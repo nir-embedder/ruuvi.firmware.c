@@ -215,3 +215,34 @@ jobs:
               "build/$candidate/nrf54_zephyr/zephyr/zephyr.signed.bin"
             unzip -t "build/$candidate/dfu_application.zip"
           done
+
+  sdk5-unit-baseline:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out original application and nested submodules
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          path: app
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Fetch and verify official nRF5 SDK 15.3.0
+        run: |
+          archive="$RUNNER_TEMP/nRF5_SDK_15.3.0_59ac345.zip"
+          curl --fail --location --retry 3 --silent --show-error \
+            --output "$archive" \
+            https://developer.nordicsemi.com/nRF5_SDK/nRF5_SDK_v15.x.x/nRF5_SDK_15.3.0_59ac345.zip
+          printf '%s  %s\n' \
+            9c9307d757d109007f2fcc4e547ac10b1a9fd9faa477e8dbf3f7e1624c4801a5 \
+            "$archive" | sha256sum --check
+          unzip -q "$archive" -d app/nrf52_oldsdk
+
+      - name: Run unmodified SDK5 Ceedling application tests
+        working-directory: app/nrf52_oldsdk
+        run: |
+          ruby -e 'abort "Ceedling 1.0.1 requires Ruby 3" if RUBY_VERSION.split(".").first.to_i < 3'
+          export GEM_HOME="$RUNNER_TEMP/ruuvi-ceedling"
+          export GEM_PATH="$GEM_HOME"
+          export PATH="$GEM_HOME/bin:$PATH"
+          gem install ceedling -v 1.0.1 --install-dir "$GEM_HOME" --no-document
+          ceedling test:all
