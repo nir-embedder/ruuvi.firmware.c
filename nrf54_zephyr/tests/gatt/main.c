@@ -99,7 +99,11 @@ ZTEST(ruuvi_gatt, test_rx_validation_and_queue_ownership)
     const uint8_t operation = RE_STANDARD_VALUE_READ;
 #endif
     uint8_t request[11] = {destination, 0xA5, operation};
+    uint8_t extended[20] = {0};
     ruuvi_gatt_request_t queued = {0};
+
+    memcpy(extended, request, sizeof(request));
+    memset(extended + sizeof(request), 0x5A, sizeof(extended) - sizeof(request));
 
     subscribed = false;
     reference_available = true;
@@ -132,8 +136,8 @@ ZTEST(ruuvi_gatt, test_rx_validation_and_queue_ownership)
                   BT_GATT_ERR(BT_ATT_ERR_UNLIKELY));
     zassert_equal(references, 1U);
     reference_available = true;
-    zassert_equal(rx->write(peer, rx, request, sizeof(request), 0,
-                            BT_GATT_WRITE_FLAG_CMD), sizeof(request));
+    zassert_equal(rx->write(peer, rx, extended, sizeof(extended), 0,
+                            BT_GATT_WRITE_FLAG_CMD), sizeof(extended));
     zassert_equal(references, 2U);
     zassert_equal(rx->write(peer, rx, request, sizeof(request), 0, 0),
                   BT_GATT_ERR(BT_ATT_ERR_INSUFFICIENT_RESOURCES));
@@ -145,9 +149,17 @@ ZTEST(ruuvi_gatt, test_rx_validation_and_queue_ownership)
     zassert_equal(queued.conn, peer);
     zassert_equal(queued.data[0], destination);
     zassert_equal(queued.data[2], operation);
+    zassert_mem_equal(queued.data, extended, sizeof(queued.data));
     ruuvi_gatt_request_release(&queued);
     zassert_is_null(queued.conn);
     zassert_equal(releases, 2U);
+    request[0] = destination;
+    zassert_equal(rx->write(peer, rx, request, sizeof(request), 0, 0), sizeof(request));
+    zassert_equal(ruuvi_gatt_request_take(&queued, K_NO_WAIT), 0);
+    zassert_mem_equal(queued.data, request, sizeof(request));
+    ruuvi_gatt_request_release(&queued);
+    zassert_equal(references, 4U);
+    zassert_equal(releases, 3U);
     zassert_not_equal(ruuvi_gatt_request_take(&queued, K_NO_WAIT), 0);
 }
 

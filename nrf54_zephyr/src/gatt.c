@@ -86,7 +86,7 @@ static ssize_t ruuvi_nus_rx_write(struct bt_conn *conn, const struct bt_gatt_att
     if (offset != 0U) {
         return BT_GATT_ERR(BT_ATT_ERR_INVALID_OFFSET);
     }
-    if (len != sizeof(request.data)) {
+    if (len < sizeof(request.data)) {
         return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
     }
 #if !DT_NODE_EXISTS(DT_NODELABEL(ruuvi_history_partition)) || !RUUVI_HISTORY_ENABLED
