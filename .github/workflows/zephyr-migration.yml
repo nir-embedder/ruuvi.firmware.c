@@ -94,3 +94,108 @@ jobs:
                           any(case["status"] != "passed" for case in cases)):
                       raise SystemExit(f"{output}/{name} did not execute {count} passing cases")
           PY
+
+  ncs-signed-candidates:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out Ruuvi sources and endpoint submodules
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          path: app
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Check out NCS v3.4.1 manifest
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: nrfconnect/sdk-nrf
+          ref: v3.4.1
+          path: ncs/nrf
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up NCS Zephyr and Arm SDK
+        uses: zephyrproject-rtos/action-zephyr-setup@be8136a8bba01580485d98b7ad2d32477c36a49a # v1
+        with:
+          base-path: ncs
+          app-path: nrf
+          toolchains: arm-zephyr-eabi
+          west-update-flags: >-
+            -o=--depth=1 -n zephyr mcuboot qcbor t_cose mbedtls
+            oberon-psa-crypto nrfxlib trusted-firmware-m psa-arch-tests
+            hal_nordic cmsis cmsis_6 tf-psa-crypto zcbor segger nanopb
+
+      - name: Install NCS build requirements
+        working-directory: ncs
+        run: python3 -m pip install -r nrf/scripts/requirements.txt
+
+      - name: Build DK NFC/DFU and matched TAG history/DFU candidates
+        working-directory: ncs
+        run: |
+          APP="$GITHUB_WORKSPACE/app/nrf54_zephyr"
+          west build --sysbuild -b nrf54l15dk/nrf54l15/cpuapp -d build/dk-dfu-nfc \
+            --extra-conf "$APP/dfu.conf" --extra-conf "$APP/nfc.conf" "$APP"
+          west build --sysbuild -b nrf54l15tag/nrf54l15/cpuapp -d build/tag-history \
+            --extra-conf "$APP/nrf54l15tag.conf" \
+            --extra-conf "$APP/nrf54l15tag_history.conf" \
+            --extra-conf "$APP/dfu.conf" \
+            --extra-dtc-overlay "$APP/nrf54l15tag.overlay" \
+            --extra-dtc-overlay "$APP/nrf54l15tag_history.overlay" "$APP" \
+            -- -DSB_CONFIG_PARTITION_MANAGER=n
+
+      - name: Check generated layouts and test-key artifacts
+        working-directory: ncs
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          layouts = {
+              "dk-dfu-nfc": {
+                  "boot_partition": (0x0, 0xF800),
+                  "slot0_partition": (0x10000, 0xB2000),
+                  "slot1_partition": (0xC2000, 0xB2000),
+                  "storage_partition": (0x174000, 0x9000),
+              },
+              "tag-history": {
+                  "boot_partition": (0x0, 0xF800),
+                  "slot0_partition": (0x10000, 0xAA000),
+                  "slot1_partition": (0xBA000, 0xAA000),
+                  "ruuvi_history_partition": (0x164000, 0xF000),
+                  "storage_partition": (0x173000, 0xA000),
+              },
+          }
+          for candidate, expected in layouts.items():
+              base = Path("build") / candidate
+              for image in ("mcuboot", "nrf54_zephyr"):
+                  dts = (base / image / "zephyr/zephyr.dts").read_text()
+                  for label, location in expected.items():
+                      node = re.search(
+                          rf"\b{label}:\s+partition@[0-9a-f]+\s*\{{([^{{}}]*)\}}", dts
+                      )
+                      assert node, f"{candidate}/{image}: missing {label}"
+                      reg = re.search(
+                          r"\breg\s*=\s*<\s*(0x[0-9a-f]+)\s+(0x[0-9a-f]+)\s*>",
+                          node.group(1),
+                      )
+                      assert reg and tuple(int(value, 16) for value in reg.groups()) == location, (
+                          f"{candidate}/{image}: wrong {label} layout"
+                      )
+                  assert ("ruuvi_history_partition:" in dts) == (candidate == "tag-history")
+              app_config = (base / "nrf54_zephyr/zephyr/.config").read_text()
+              boot_config = (base / "mcuboot/zephyr/.config").read_text()
+              assert "CONFIG_MCUMGR_GRP_IMG=y" in app_config
+              assert "CONFIG_MCUMGR_TRANSPORT_BT_PERM_RW_ENCRYPT=y" in app_config
+              assert ("CONFIG_NFC_T4T_NRFXLIB=y" in app_config) == (candidate == "dk-dfu-nfc")
+              assert "CONFIG_BOOT_SIGNATURE_TYPE_ECDSA_P256=y" in boot_config
+          PY
+          for candidate in dk-dfu-nfc tag-history; do
+            python3 bootloader/mcuboot/scripts/imgtool.py verify \
+              --key bootloader/mcuboot/root-ec-p256.pem \
+              "build/$candidate/nrf54_zephyr/zephyr/zephyr.signed.bin"
+            unzip -t "build/$candidate/dfu_application.zip"
+          done
