@@ -52,6 +52,57 @@ jobs:
             --extra-dtc-overlay "$APP/nrf54l15tag_history.overlay" \
             "$APP"
 
+      - name: Build remaining legacy mode candidates
+        working-directory: app
+        run: |
+          APP="$PWD/nrf54_zephyr"
+          check_variant() {
+            python3 - "$1" <<'PY'
+          import sys
+          from pathlib import Path
+
+          mode = sys.argv[1]
+          expected = {
+              "debug": (221, 2, 1, 600000, 2, 1, 1),
+              "test": (221, 2, 1, 600000, 2, 1, 1),
+              "uuid": (1285, 7, 300, 360000, 16, 1, 1),
+              "longlife": (8995, 1, 300, 360000, 2, 0, 0),
+              "longmem": (1285, 2, 1800, 360000, 2, 1, 1),
+          }
+          keys = ("RUUVI_BLE_INTERVAL_MS", "RUUVI_NUM_REPEATS", "RUUVI_LOG_INTERVAL_S",
+                  "RUUVI_WDT_TIMEOUT_MS", "RUUVI_ENABLED_FORMATS", "RUUVI_GATT_ENABLED",
+                  "RUUVI_HISTORY_ENABLED")
+          root = Path("build/variant-smoke")
+          if f"RUUVI_VARIANT:STRING={mode}" not in (root / "CMakeCache.txt").read_text():
+              raise SystemExit(f"Wrong build variant: {mode}")
+          ninja = (root / "build.ninja").read_text()
+          defines = next(line.split("DEFINES = ", 1)[1] for line in ninja.splitlines()
+                         if line.strip().startswith("DEFINES = ") and "RUUVI_ENABLED_FORMATS" in line)
+          required = {f"-D{key}={value}" for key, value in zip(keys, expected[mode])}
+          missing = required - set(defines.split())
+          if missing:
+              raise SystemExit(f"{mode}: wrong compiled mode definitions: {sorted(missing)}")
+          config = (root / "zephyr/.config").read_text()
+          if ("CONFIG_BT_PERIPHERAL=y" in config) != (mode != "longlife"):
+              raise SystemExit(f"{mode}: wrong connectability configuration")
+          PY
+          }
+          for variant in debug test uuid longlife; do
+            west build --pristine=always -b nrf54l15dk/nrf54l15/cpuapp \
+              -d build/variant-smoke "$APP" -- -DRUUVI_VARIANT="$variant"
+            test -s build/variant-smoke/zephyr/zephyr.elf
+            check_variant "$variant"
+          done
+          west build --pristine=always -b nrf54l15tag/nrf54l15/cpuapp \
+            -d build/variant-smoke \
+            --extra-conf "$APP/nrf54l15tag.conf" \
+            --extra-conf "$APP/nrf54l15tag_history.conf" \
+            --extra-dtc-overlay "$APP/nrf54l15tag.overlay" \
+            --extra-dtc-overlay "$APP/nrf54l15tag_history.overlay" \
+            "$APP" -- -DRUUVI_VARIANT=longmem
+          test -s build/variant-smoke/zephyr/zephyr.elf
+          check_variant longmem
+
       - name: Run AES, history, NFC, UI, sensor and GATT simulator cases
         working-directory: app
         run: |
