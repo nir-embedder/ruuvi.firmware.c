@@ -9,12 +9,16 @@
 
 #include "sensors.h"
 
-enum fake_role { ACCEL, ENVIRONMENT, TEMPERATURE, HUMIDITY, PRESSURE };
+enum fake_role { ACCEL, ENVIRONMENT, TEMPERATURE, HUMIDITY, PRESSURE, BATTERY };
 static const enum fake_role accel_role = ACCEL;
 static const enum fake_role environment_role = ENVIRONMENT;
 static const enum fake_role temperature_role = TEMPERATURE;
 static const enum fake_role humidity_role = HUMIDITY;
 static const enum fake_role pressure_role = PRESSURE;
+static const enum fake_role battery_role = BATTERY;
+static bool battery_available;
+static bool battery_fetch_error;
+static unsigned int battery_fetches;
 static bool environment_available = true;
 static bool temperature_available = true;
 static bool humidity_available = true;
@@ -77,6 +81,9 @@ static int fake_sample_fetch(const struct device *dev, enum sensor_channel chann
         return humidity_fetch_error ? -EIO : 0;
     case PRESSURE:
         return pressure_fetch_error ? -EIO : 0;
+    case BATTERY:
+        ++battery_fetches;
+        return battery_fetch_error ? -EIO : (battery_available ? 0 : -ENODATA);
     }
     return -EINVAL;
 }
@@ -131,6 +138,12 @@ static int fake_channel_get(const struct device *dev, enum sensor_channel channe
             return 0;
         }
         break;
+    case BATTERY:
+        if (channel == SENSOR_CHAN_VOLTAGE && battery_available) {
+            *values = (struct sensor_value) {2, 975000};
+            return 0;
+        }
+        break;
     }
     return -ENODATA;
 }
@@ -150,6 +163,8 @@ DEVICE_DT_DEFINE(DT_NODELABEL(temperature_test), NULL, NULL, NULL, &temperature_
 DEVICE_DT_DEFINE(DT_NODELABEL(humidity_test), NULL, NULL, NULL, &humidity_role,
                  POST_KERNEL, CONFIG_SENSOR_INIT_PRIORITY, &fake_api);
 DEVICE_DT_DEFINE(DT_NODELABEL(pressure_test), NULL, NULL, NULL, &pressure_role,
+                 POST_KERNEL, CONFIG_SENSOR_INIT_PRIORITY, &fake_api);
+DEVICE_DT_DEFINE(DT_NODELABEL(battery_test), NULL, NULL, NULL, &battery_role,
                  POST_KERNEL, CONFIG_SENSOR_INIT_PRIORITY, &fake_api);
 
 ZTEST(ruuvi_motion, test_real_sensor_api_and_counter)
@@ -268,6 +283,34 @@ ZTEST(ruuvi_motion, test_partial_sensor_failures)
     humidity_fetch_error = false;
     pressure_fetch_error = false;
     accel_available = true;
+}
+
+ZTEST(ruuvi_motion, test_battery_cache_and_failures)
+{
+    re_5_data_t sample;
+
+    battery_available = true;
+    k_sleep(K_SECONDS(61)); /* Also covers a prior test's unavailable-sample cache. */
+    unsigned int before = battery_fetches;
+    zassert_equal(ruuvi_sensor_read(&sample), 7);
+    zassert_true(fabsf(sample.battery_v - 2.975f) < 0.0001f);
+    zassert_equal(battery_fetches, before + 1U);
+    zassert_equal(ruuvi_sensor_read(&sample), 7);
+    zassert_equal(battery_fetches, before + 1U); /* Reuse the cached value. */
+
+    k_sleep(K_SECONDS(61));
+    battery_fetch_error = true;
+    zassert_equal(ruuvi_sensor_read(&sample), 6);
+    zassert_true(isnan(sample.battery_v)); /* An I/O error must not publish stale VDD. */
+    zassert_equal(battery_fetches, before + 2U);
+
+    battery_fetch_error = false;
+    zassert_equal(ruuvi_sensor_read(&sample), 7); /* Retry on the next heartbeat. */
+    zassert_equal(battery_fetches, before + 3U);
+    battery_available = false;
+    k_sleep(K_SECONDS(61));
+    zassert_equal(ruuvi_sensor_read(&sample), 6);
+    zassert_true(isnan(sample.battery_v));
 }
 
 ZTEST_SUITE(ruuvi_motion, NULL, NULL, NULL, NULL, NULL);

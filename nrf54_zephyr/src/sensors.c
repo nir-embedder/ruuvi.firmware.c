@@ -271,8 +271,11 @@ int ruuvi_sensor_read(re_5_data_t *sample)
             if (rc == -ENOTSUP || rc == -ENODATA || rc == -EINVAL) {
                 cached_battery_valid = false;
                 battery_sample_due_ms = now_ms + 60000;
-            } else if (rc < 0 && first_error == 0) {
-                first_error = rc;
+            } else if (rc < 0) {
+                cached_battery_valid = false;
+                if (first_error == 0) {
+                    first_error = rc;
+                }
             }
         }
         if (cached_battery_valid) {

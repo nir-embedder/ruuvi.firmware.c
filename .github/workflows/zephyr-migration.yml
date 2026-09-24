@@ -75,7 +75,7 @@ jobs:
               "twister-mps2": {
                   "ruuvi.history_flash.simulator": 4,
                   "ruuvi.ui.gpio_emulator": 1,
-                  "ruuvi.sensors.motion_trigger": 3,
+                  "ruuvi.sensors.motion_trigger": 4,
               },
           }
           for output, suites in expected.items():
