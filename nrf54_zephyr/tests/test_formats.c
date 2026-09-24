@@ -139,6 +139,21 @@ static void test_plain_formats(void)
     };
     assert(memcmp(df7, expected7, sizeof(expected7)) == 0);
 
+    /* SDK5 encode_to_7 zero-initializes unused acceleration and light fields. */
+    ruuvi_measurement_t legacy7 = typical();
+    legacy7.accelerationx_g = 0.0f;
+    legacy7.accelerationy_g = 0.0f;
+    legacy7.accelerationz_g = 0.0f;
+    legacy7.luminosity_lux = 0.0f;
+    legacy7.color_temp_k = 0.0f;
+    size = sizeof(df7);
+    assert(ruuvi_format_encode(RUUVI_FORMAT_7, &legacy7, NULL, df7, &size) == 0);
+    assert(df7[RE_7_OFFSET_TILT_X] == RE_7_INVALID_TILT);
+    assert(df7[RE_7_OFFSET_TILT_Y] == RE_7_INVALID_TILT);
+    assert(df7[RE_7_OFFSET_LUMI_MSB] == 0 && df7[RE_7_OFFSET_LUMI_LSB] == 0);
+    assert(df7[RE_7_OFFSET_COLOR_TEMP] == 0);
+    assert(df7[RE_7_OFFSET_CRC] == re_calc_crc8(df7, RE_7_OFFSET_CRC));
+
     data.measurement_count = 255;
     data.movement_count = 255;
     size = sizeof(df7);

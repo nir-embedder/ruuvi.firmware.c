@@ -4,7 +4,6 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include <math.h>
 
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/conn.h>
@@ -809,12 +808,13 @@ int main(void)
             .humidity_rh = sample.humidity_rh,
             .pressure_pa = sample.pressure_pa,
             .temperature_c = sample.temperature_c,
-            .accelerationx_g = sample.accelerationx_g,
-            .accelerationy_g = sample.accelerationy_g,
-            .accelerationz_g = sample.accelerationz_g,
+            /* SDK5 encode_to_7 leaves acceleration/light fields zero-initialized. */
+            .accelerationx_g = format == RUUVI_FORMAT_7 ? 0.0f : sample.accelerationx_g,
+            .accelerationy_g = format == RUUVI_FORMAT_7 ? 0.0f : sample.accelerationy_g,
+            .accelerationz_g = format == RUUVI_FORMAT_7 ? 0.0f : sample.accelerationz_g,
             .battery_v = sample.battery_v,
-            .luminosity_lux = NAN,
-            .color_temp_k = NAN,
+            .luminosity_lux = 0.0f,
+            .color_temp_k = 0.0f,
             .measurement_count = sequence[slot],
             .movement_count = ruuvi_sensor_motion_count_get(),
             .address = address,
