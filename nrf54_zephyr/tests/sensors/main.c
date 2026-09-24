@@ -1,4 +1,5 @@
 #include <errno.h>
+#include <math.h>
 #include <stdbool.h>
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
@@ -18,6 +19,13 @@ static bool environment_available = true;
 static bool temperature_available = true;
 static bool humidity_available = true;
 static bool pressure_available = true;
+static bool accel_available = true;
+static bool environment_fetch_error;
+static bool environment_humidity_error;
+static bool temperature_fetch_error;
+static bool humidity_fetch_error;
+static bool pressure_fetch_error;
+static bool pressure_channel_error;
 static bool supports_motion;
 static bool fail_threshold;
 static int probe_calls;
@@ -58,8 +66,19 @@ static int fake_attr_set(const struct device *dev, enum sensor_channel channel,
 static int fake_sample_fetch(const struct device *dev, enum sensor_channel channel)
 {
     ARG_UNUSED(channel);
-    return (*(const enum fake_role *)dev->config == ENVIRONMENT &&
-            !environment_available) ? -ENODATA : 0;
+    switch (*(const enum fake_role *)dev->config) {
+    case ACCEL:
+        return accel_available ? 0 : -ENODATA;
+    case ENVIRONMENT:
+        return environment_fetch_error ? -EIO : (environment_available ? 0 : -ENODATA);
+    case TEMPERATURE:
+        return temperature_fetch_error ? -EIO : 0;
+    case HUMIDITY:
+        return humidity_fetch_error ? -EIO : 0;
+    case PRESSURE:
+        return pressure_fetch_error ? -EIO : 0;
+    }
+    return -EINVAL;
 }
 
 static int fake_channel_get(const struct device *dev, enum sensor_channel channel,
@@ -80,6 +99,9 @@ static int fake_channel_get(const struct device *dev, enum sensor_channel channe
             return 0;
         }
         if (channel == SENSOR_CHAN_HUMIDITY) {
+            if (environment_humidity_error) {
+                return -EIO;
+            }
             *values = (struct sensor_value) {33, 0};
             return 0;
         }
@@ -102,6 +124,9 @@ static int fake_channel_get(const struct device *dev, enum sensor_channel channe
         break;
     case PRESSURE:
         if (channel == SENSOR_CHAN_PRESS && pressure_available) {
+            if (pressure_channel_error) {
+                return -EIO;
+            }
             *values = (struct sensor_value) {100, 125000};
             return 0;
         }
@@ -197,6 +222,52 @@ ZTEST(ruuvi_motion, test_split_environmental_channels)
     temperature_available = true;
     humidity_available = true;
     pressure_available = true;
+}
+
+ZTEST(ruuvi_motion, test_partial_sensor_failures)
+{
+    re_5_data_t sample;
+
+    environment_fetch_error = true;
+    zassert_equal(ruuvi_sensor_read(&sample), 6);
+    zassert_equal(sample.temperature_c, 22.25f);
+    zassert_equal(sample.humidity_rh, 55.5f);
+    zassert_equal(sample.pressure_pa, 100125.0f);
+
+    environment_fetch_error = false;
+    environment_humidity_error = true;
+    zassert_equal(ruuvi_sensor_read(&sample), 6);
+    zassert_equal(sample.humidity_rh, 55.5f);
+
+    humidity_available = false;
+    zassert_equal(ruuvi_sensor_read(&sample), 5);
+    zassert_true(isnan(sample.humidity_rh));
+    environment_humidity_error = false;
+    humidity_available = true;
+
+    temperature_fetch_error = true;
+    pressure_channel_error = true;
+    zassert_equal(ruuvi_sensor_read(&sample), 6);
+    zassert_equal(sample.temperature_c, 10.5f);
+    zassert_equal(sample.pressure_pa, 101200.0f);
+    temperature_fetch_error = false;
+    pressure_channel_error = false;
+
+    environment_fetch_error = true;
+    temperature_fetch_error = true;
+    humidity_fetch_error = true;
+    pressure_fetch_error = true;
+    accel_available = false;
+    zassert_equal(ruuvi_sensor_read(&sample), -EIO);
+    zassert_true(isnan(sample.temperature_c));
+    zassert_true(isnan(sample.humidity_rh));
+    zassert_true(isnan(sample.pressure_pa));
+
+    environment_fetch_error = false;
+    temperature_fetch_error = false;
+    humidity_fetch_error = false;
+    pressure_fetch_error = false;
+    accel_available = true;
 }
 
 ZTEST_SUITE(ruuvi_motion, NULL, NULL, NULL, NULL, NULL);

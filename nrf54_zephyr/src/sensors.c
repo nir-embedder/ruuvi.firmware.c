@@ -110,6 +110,7 @@ static int read_single_channel(const struct device *dev, enum sensor_channel cha
 int ruuvi_sensor_read(re_5_data_t *sample)
 {
     int count = 0;
+    int first_error = 0;
 
     if (sample == NULL) {
         return -EINVAL;
@@ -132,26 +133,29 @@ int ruuvi_sensor_read(re_5_data_t *sample)
         if (rc == 0) {
             rc = read_env_channel(env, SENSOR_CHAN_AMBIENT_TEMP, 1.0,
                                   &sample->temperature_c);
-            if (rc < 0) {
-                return rc;
+            if (rc < 0 && first_error == 0) {
+                first_error = rc;
+            } else if (rc > 0) {
+                count += rc;
             }
-            count += rc;
 
             rc = read_env_channel(env, SENSOR_CHAN_HUMIDITY, 1.0,
-                                  &sample->humidity_rh);
-            if (rc < 0) {
-                return rc;
+                                   &sample->humidity_rh);
+            if (rc < 0 && first_error == 0) {
+                first_error = rc;
+            } else if (rc > 0) {
+                count += rc;
             }
-            count += rc;
 
             rc = read_env_channel(env, SENSOR_CHAN_PRESS, 1000.0,
-                                  &sample->pressure_pa);
-            if (rc < 0) {
-                return rc;
+                                   &sample->pressure_pa);
+            if (rc < 0 && first_error == 0) {
+                first_error = rc;
+            } else if (rc > 0) {
+                count += rc;
             }
-            count += rc;
-        } else if (rc != -ENOTSUP && rc != -ENODATA) {
-            return rc;
+        } else if (rc != -ENOTSUP && rc != -ENODATA && first_error == 0) {
+            first_error = rc;
         }
     }
 #endif
@@ -162,10 +166,11 @@ int ruuvi_sensor_read(re_5_data_t *sample)
         int rc = read_single_channel(DEVICE_DT_GET(DT_ALIAS(temp0)),
                                      SENSOR_CHAN_AMBIENT_TEMP, 1.0,
                                      &sample->temperature_c);
-        if (rc < 0) {
-            return rc;
+        if (rc < 0 && first_error == 0) {
+            first_error = rc;
+        } else if (rc > 0 && !had_temperature) {
+            count++;
         }
-        count += rc > 0 && !had_temperature ? 1 : 0;
     }
 #endif
 #if DT_NODE_HAS_STATUS(DT_ALIAS(humidity0), okay)
@@ -174,10 +179,11 @@ int ruuvi_sensor_read(re_5_data_t *sample)
         int rc = read_single_channel(DEVICE_DT_GET(DT_ALIAS(humidity0)),
                                      SENSOR_CHAN_HUMIDITY, 1.0,
                                      &sample->humidity_rh);
-        if (rc < 0) {
-            return rc;
+        if (rc < 0 && first_error == 0) {
+            first_error = rc;
+        } else if (rc > 0 && !had_humidity) {
+            count++;
         }
-        count += rc > 0 && !had_humidity ? 1 : 0;
     }
 #endif
 #if DT_NODE_HAS_STATUS(DT_ALIAS(pressure0), okay)
@@ -186,10 +192,11 @@ int ruuvi_sensor_read(re_5_data_t *sample)
         int rc = read_single_channel(DEVICE_DT_GET(DT_ALIAS(pressure0)),
                                      SENSOR_CHAN_PRESS, 1000.0,
                                      &sample->pressure_pa);
-        if (rc < 0) {
-            return rc;
+        if (rc < 0 && first_error == 0) {
+            first_error = rc;
+        } else if (rc > 0 && !had_pressure) {
+            count++;
         }
-        count += rc > 0 && !had_pressure ? 1 : 0;
     }
 #endif
 
@@ -207,11 +214,12 @@ int ruuvi_sensor_read(re_5_data_t *sample)
                 if (rc == 0) {
                     sample->temperature_c = (re_float)sensor_value_to_double(&value);
                     count++;
-                } else if (rc != -ENOTSUP && rc != -ENODATA && rc != -EINVAL) {
-                    return rc;
+                } else if (rc != -ENOTSUP && rc != -ENODATA && rc != -EINVAL &&
+                           first_error == 0) {
+                    first_error = rc;
                 }
-            } else if (rc != -ENOTSUP && rc != -ENODATA) {
-                return rc;
+            } else if (rc != -ENOTSUP && rc != -ENODATA && first_error == 0) {
+                first_error = rc;
             }
         }
     }
@@ -234,11 +242,12 @@ int ruuvi_sensor_read(re_5_data_t *sample)
                 sample->accelerationz_g = (re_float)(sensor_value_to_double(&axes[2]) /
                                                       9.80665);
                 count += 3;
-            } else if (rc != -ENOTSUP && rc != -ENODATA && rc != -EINVAL) {
-                return rc;
+            } else if (rc != -ENOTSUP && rc != -ENODATA && rc != -EINVAL &&
+                       first_error == 0) {
+                first_error = rc;
             }
-        } else if (rc != -ENOTSUP && rc != -ENODATA) {
-            return rc;
+        } else if (rc != -ENOTSUP && rc != -ENODATA && first_error == 0) {
+            first_error = rc;
         }
     }
 #endif
@@ -262,8 +271,8 @@ int ruuvi_sensor_read(re_5_data_t *sample)
             if (rc == -ENOTSUP || rc == -ENODATA || rc == -EINVAL) {
                 cached_battery_valid = false;
                 battery_sample_due_ms = now_ms + 60000;
-            } else if (rc < 0) {
-                return rc;
+            } else if (rc < 0 && first_error == 0) {
+                first_error = rc;
             }
         }
         if (cached_battery_valid) {
@@ -273,5 +282,5 @@ int ruuvi_sensor_read(re_5_data_t *sample)
     }
 #endif
 
-    return count;
+    return count > 0 ? count : first_error;
 }

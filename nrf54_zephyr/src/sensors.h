@@ -14,7 +14,9 @@
  * driver supplies a fallback; die temperature is not ambient temperature.
  * Absent/unready devices and unsupported channels remain NAN. Other DF5 metadata
  * is owned by the caller. Returns the count of valid channels (axes count
- * separately), or negative errno for invalid input/unexpected driver errors.
+ * separately). A failed provider does not discard channels from other
+ * providers; returns negative errno for invalid input or when every provider
+ * fails and at least one reports an unexpected driver error.
  */
 int ruuvi_sensor_read(re_5_data_t *sample);
 /* Registers a real accelerometer motion trigger when accel0 supports one.
