@@ -1,0 +1,15 @@
+tests:
+  ruuvi.gatt.rx_queue:
+    tags:
+      - bluetooth
+    integration_platforms:
+      - mps2/an385
+  ruuvi.gatt.rx_queue_history:
+    tags:
+      - bluetooth
+    integration_platforms:
+      - mps2/an385
+    extra_args:
+      - RUUVI_TEST_HISTORY=1
+    extra_dtc_overlay_files:
+      - ../history_flash/mps2_history.overlay

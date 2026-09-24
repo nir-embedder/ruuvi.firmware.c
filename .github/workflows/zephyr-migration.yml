@@ -52,7 +52,7 @@ jobs:
             --extra-dtc-overlay "$APP/nrf54l15tag_history.overlay" \
             "$APP"
 
-      - name: Run AES, history, NFC, UI and sensor simulator cases
+      - name: Run AES, history, NFC, UI, sensor and GATT simulator cases
         working-directory: app
         run: |
           west twister -T nrf54_zephyr/tests/aes_vector \
@@ -61,6 +61,7 @@ jobs:
           west twister -T nrf54_zephyr/tests/history_flash \
             -T nrf54_zephyr/tests/ui \
             -T nrf54_zephyr/tests/sensors \
+            -T nrf54_zephyr/tests/gatt \
             -p mps2/an385 -O build/twister-mps2 -i
 
       - name: Require executed simulator coverage
@@ -76,6 +77,8 @@ jobs:
                   "ruuvi.history_flash.simulator": 4,
                   "ruuvi.ui.gpio_emulator": 1,
                   "ruuvi.sensors.motion_trigger": 4,
+                  "ruuvi.gatt.rx_queue": 1,
+                  "ruuvi.gatt.rx_queue_history": 1,
               },
           }
           for output, suites in expected.items():
