@@ -246,7 +246,7 @@ jobs:
           export PATH="$GEM_HOME/bin:$PATH"
           gem install ceedling -v 1.0.1 --install-dir "$GEM_HOME" --no-document
           set -o pipefail
-          ceedling test:all | tee "$RUNNER_TEMP/sdk5-ceedling.log"
+          ceedling test:all 2>&1 | tee "$RUNNER_TEMP/sdk5-ceedling.log"
           python3 - <<'PY'
           import os
           import re
