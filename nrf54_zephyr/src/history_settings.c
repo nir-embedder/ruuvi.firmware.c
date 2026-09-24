@@ -2,7 +2,9 @@
 
 #include <errno.h>
 #include <stdint.h>
+#include <zephyr/devicetree.h>
 #include <zephyr/storage/flash_map.h>
+#include <zephyr/sys/util.h>
 
 #if defined(CONFIG_NVS) && defined(CONFIG_FLASH_MAP) && \
     defined(CONFIG_FLASH_PAGE_LAYOUT) && PARTITION_EXISTS(storage_partition)
@@ -11,6 +13,17 @@
 #include <zephyr/drivers/flash.h>
 #include <zephyr/kernel.h>
 #include <zephyr/kvss/nvs.h>
+
+#if defined(CONFIG_SETTINGS_NVS) || defined(CONFIG_SETTINGS_ZMS) || \
+    defined(CONFIG_SETTINGS_FCB)
+#if !DT_HAS_CHOSEN(zephyr_settings_partition)
+#error "Zephyr settings must use a separate partition from the Ruuvi NVS mount"
+#else
+BUILD_ASSERT(!DT_SAME_NODE(DT_CHOSEN(zephyr_settings_partition),
+                           DT_NODELABEL(storage_partition)),
+             "Zephyr settings and Ruuvi history cannot mount the same partition");
+#endif
+#endif
 
 /* Below Zephyr settings NVS's reserved range (0x8000 and above). */
 #define HISTORY_CONFIG_ID UINT16_C(0x4843)
