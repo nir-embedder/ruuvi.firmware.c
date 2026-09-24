@@ -3,8 +3,28 @@
         compatible = "ruuvi,motion-test";
         status = "okay";
     };
+    environment_test: environment-test {
+        compatible = "ruuvi,motion-test";
+        status = "okay";
+    };
+    temperature_test: temperature-test {
+        compatible = "ruuvi,motion-test";
+        status = "okay";
+    };
+    humidity_test: humidity-test {
+        compatible = "ruuvi,motion-test";
+        status = "okay";
+    };
+    pressure_test: pressure-test {
+        compatible = "ruuvi,motion-test";
+        status = "okay";
+    };
 
     aliases {
         accel0 = &motion_test;
+        env0 = &environment_test;
+        temp0 = &temperature_test;
+        humidity0 = &humidity_test;
+        pressure0 = &pressure_test;
     };
 };

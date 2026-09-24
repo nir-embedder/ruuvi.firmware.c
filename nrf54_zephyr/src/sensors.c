@@ -66,7 +66,10 @@ static bool cached_battery_valid;
 static int64_t battery_sample_due_ms;
 #endif
 
-#if DT_NODE_HAS_STATUS(DT_ALIAS(env0), okay)
+#if DT_NODE_HAS_STATUS(DT_ALIAS(env0), okay) || \
+    DT_NODE_HAS_STATUS(DT_ALIAS(temp0), okay) || \
+    DT_NODE_HAS_STATUS(DT_ALIAS(humidity0), okay) || \
+    DT_NODE_HAS_STATUS(DT_ALIAS(pressure0), okay)
 static int read_env_channel(const struct device *dev, enum sensor_channel channel,
                             double scale, re_float *destination)
 {
@@ -83,6 +86,25 @@ static int read_env_channel(const struct device *dev, enum sensor_channel channe
     *destination = (re_float)(sensor_value_to_double(&value) * scale);
     return 1;
 }
+#if DT_NODE_HAS_STATUS(DT_ALIAS(temp0), okay) || \
+    DT_NODE_HAS_STATUS(DT_ALIAS(humidity0), okay) || \
+    DT_NODE_HAS_STATUS(DT_ALIAS(pressure0), okay)
+static int read_single_channel(const struct device *dev, enum sensor_channel channel,
+                               double scale, re_float *destination)
+{
+    if (!device_is_ready(dev)) {
+        return 0;
+    }
+    int rc = sensor_sample_fetch(dev);
+    if (rc == -ENOTSUP || rc == -ENODATA) {
+        return 0;
+    }
+    if (rc < 0) {
+        return rc;
+    }
+    return read_env_channel(dev, channel, scale, destination);
+}
+#endif
 #endif
 
 int ruuvi_sensor_read(re_5_data_t *sample)
@@ -131,6 +153,43 @@ int ruuvi_sensor_read(re_5_data_t *sample)
         } else if (rc != -ENOTSUP && rc != -ENODATA) {
             return rc;
         }
+    }
+#endif
+
+#if DT_NODE_HAS_STATUS(DT_ALIAS(temp0), okay)
+    {
+        bool had_temperature = !isnan(sample->temperature_c);
+        int rc = read_single_channel(DEVICE_DT_GET(DT_ALIAS(temp0)),
+                                     SENSOR_CHAN_AMBIENT_TEMP, 1.0,
+                                     &sample->temperature_c);
+        if (rc < 0) {
+            return rc;
+        }
+        count += rc > 0 && !had_temperature ? 1 : 0;
+    }
+#endif
+#if DT_NODE_HAS_STATUS(DT_ALIAS(humidity0), okay)
+    {
+        bool had_humidity = !isnan(sample->humidity_rh);
+        int rc = read_single_channel(DEVICE_DT_GET(DT_ALIAS(humidity0)),
+                                     SENSOR_CHAN_HUMIDITY, 1.0,
+                                     &sample->humidity_rh);
+        if (rc < 0) {
+            return rc;
+        }
+        count += rc > 0 && !had_humidity ? 1 : 0;
+    }
+#endif
+#if DT_NODE_HAS_STATUS(DT_ALIAS(pressure0), okay)
+    {
+        bool had_pressure = !isnan(sample->pressure_pa);
+        int rc = read_single_channel(DEVICE_DT_GET(DT_ALIAS(pressure0)),
+                                     SENSOR_CHAN_PRESS, 1000.0,
+                                     &sample->pressure_pa);
+        if (rc < 0) {
+            return rc;
+        }
+        count += rc > 0 && !had_pressure ? 1 : 0;
     }
 #endif
 

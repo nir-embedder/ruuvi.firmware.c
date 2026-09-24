@@ -4,9 +4,10 @@
 #include "../../nrf52_oldsdk/src/ruuvi.endpoints.c/src/ruuvi_endpoint_5.h"
 #include <stdint.h>
 
-/* Optional board /aliases: env0 -> enabled Zephyr temperature/humidity/pressure
- * sensor (e.g. BME280 on I2C/SPI, SHTCX, TMP117); accel0 -> enabled
- * accelerometer (e.g. LIS2DH); battery0 -> enabled voltage sensor providing
+/* Optional board /aliases: env0 -> multi-channel T/H/P sensor; temp0,
+ * humidity0 and pressure0 -> dedicated sensors overriding env0 only for
+ * successfully read channels (pressure is converted from kPa to Pa).
+ * accel0 -> enabled accelerometer; battery0 -> voltage sensor providing
  * SENSOR_CHAN_VOLTAGE in volts, sampled at most once per 60 seconds and
  * cached between heartbeats. The matching drivers must be enabled.
  * If environmental temperature is unavailable, the Nordic die temperature
