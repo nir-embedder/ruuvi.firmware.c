@@ -8,6 +8,9 @@
 
 struct bt_conn;
 
+/* Legacy RI_SCHEDULER_LENGTH is 10 events, shared across event types. */
+#define RUUVI_GATT_REQUEST_QUEUE_LEN 10U
+
 typedef struct {
     uint8_t data[11];
     struct bt_conn *conn;

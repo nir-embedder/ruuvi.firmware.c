@@ -133,9 +133,15 @@ ZTEST(ruuvi_gatt, test_rx_validation_and_queue_ownership)
     zassert_equal(rx->write(peer, rx, extended, sizeof(extended), 0,
                             BT_GATT_WRITE_FLAG_CMD), sizeof(extended));
     zassert_equal(references, 2U);
+    for (uint8_t i = 1U; i < RUUVI_GATT_REQUEST_QUEUE_LEN; ++i) {
+        request[3] = i;
+        zassert_equal(rx->write(peer, rx, request, sizeof(request), 0, 0),
+                      sizeof(request));
+    }
+    request[3] = 0xFE;
     zassert_equal(rx->write(peer, rx, request, sizeof(request), 0, 0),
                   BT_GATT_ERR(BT_ATT_ERR_INSUFFICIENT_RESOURCES));
-    zassert_equal(references, 3U);
+    zassert_equal(references, RUUVI_GATT_REQUEST_QUEUE_LEN + 2U);
     zassert_equal(releases, 1U);
 
     request[0] = 0;
@@ -146,14 +152,22 @@ ZTEST(ruuvi_gatt, test_rx_validation_and_queue_ownership)
     zassert_mem_equal(queued.data, extended, sizeof(queued.data));
     ruuvi_gatt_request_release(&queued);
     zassert_is_null(queued.conn);
-    zassert_equal(releases, 2U);
+    for (uint8_t i = 1U; i < RUUVI_GATT_REQUEST_QUEUE_LEN; ++i) {
+        zassert_equal(ruuvi_gatt_request_take(&queued, K_NO_WAIT), 0);
+        zassert_equal(queued.conn, peer);
+        zassert_equal(queued.data[0], destination);
+        zassert_equal(queued.data[3], i);
+        ruuvi_gatt_request_release(&queued);
+    }
+    zassert_equal(releases, RUUVI_GATT_REQUEST_QUEUE_LEN + 1U);
     request[0] = destination;
+    request[3] = 0;
     zassert_equal(rx->write(peer, rx, request, sizeof(request), 0, 0), sizeof(request));
     zassert_equal(ruuvi_gatt_request_take(&queued, K_NO_WAIT), 0);
     zassert_mem_equal(queued.data, request, sizeof(request));
     ruuvi_gatt_request_release(&queued);
-    zassert_equal(references, 4U);
-    zassert_equal(releases, 3U);
+    zassert_equal(references, RUUVI_GATT_REQUEST_QUEUE_LEN + 3U);
+    zassert_equal(releases, RUUVI_GATT_REQUEST_QUEUE_LEN + 2U);
     zassert_not_equal(ruuvi_gatt_request_take(&queued, K_NO_WAIT), 0);
 #if !RUUVI_HISTORY_ENABLED
     request[0] = RE_STANDARD_DESTINATION_TEMPERATURE;
@@ -162,8 +176,8 @@ ZTEST(ruuvi_gatt, test_rx_validation_and_queue_ownership)
     zassert_equal(ruuvi_gatt_request_take(&queued, K_NO_WAIT), 0);
     zassert_mem_equal(queued.data, request, sizeof(request));
     ruuvi_gatt_request_release(&queued);
-    zassert_equal(references, 5U);
-    zassert_equal(releases, 4U);
+    zassert_equal(references, RUUVI_GATT_REQUEST_QUEUE_LEN + 4U);
+    zassert_equal(releases, RUUVI_GATT_REQUEST_QUEUE_LEN + 3U);
 #endif
 }
 

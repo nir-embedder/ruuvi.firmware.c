@@ -49,7 +49,8 @@ BT_CONN_CB_DEFINE(ruuvi_password_connections) = {
     .disconnected = password_reply_disconnected,
 };
 
-K_MSGQ_DEFINE(ruuvi_gatt_requests, sizeof(ruuvi_gatt_request_t), 1, 1);
+K_MSGQ_DEFINE(ruuvi_gatt_requests, sizeof(ruuvi_gatt_request_t),
+              RUUVI_GATT_REQUEST_QUEUE_LEN, 1);
 
 static ssize_t ruuvi_nus_rx_write(struct bt_conn *conn, const struct bt_gatt_attr *attr,
                                   const void *buf, uint16_t len, uint16_t offset, uint8_t flags);
