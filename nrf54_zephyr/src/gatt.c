@@ -9,7 +9,6 @@
 #include <zephyr/bluetooth/conn.h>
 #include <zephyr/bluetooth/gatt.h>
 #include <zephyr/bluetooth/uuid.h>
-#include <zephyr/devicetree.h>
 
 #define RUUVI_GATT_DF5_LENGTH 18U
 
@@ -89,11 +88,6 @@ static ssize_t ruuvi_nus_rx_write(struct bt_conn *conn, const struct bt_gatt_att
     if (len < sizeof(request.data)) {
         return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
     }
-#if !DT_NODE_EXISTS(DT_NODELABEL(ruuvi_history_partition)) || !RUUVI_HISTORY_ENABLED
-    if (((const uint8_t *)buf)[RE_STANDARD_OPERATION_INDEX] == RE_STANDARD_LOG_VALUE_READ) {
-        return BT_GATT_ERR(BT_ATT_ERR_NOT_SUPPORTED);
-    }
-#endif
     if (conn == NULL || !bt_gatt_is_subscribed(conn, &ruuvi_nus.attrs[4],
                                                 BT_GATT_CCC_NOTIFY)) {
         return BT_GATT_ERR(BT_ATT_ERR_AUTHORIZATION);

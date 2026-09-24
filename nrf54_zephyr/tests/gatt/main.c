@@ -118,12 +118,6 @@ ZTEST(ruuvi_gatt, test_rx_validation_and_queue_ownership)
                   BT_GATT_ERR(BT_ATT_ERR_INVALID_OFFSET));
     zassert_equal(rx->write(peer, rx, request, sizeof(request) - 1U, 0, 0),
                   BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN));
-#if !RUUVI_HISTORY_ENABLED
-    request[2] = RE_STANDARD_LOG_VALUE_READ;
-    zassert_equal(rx->write(peer, rx, request, sizeof(request), 0, 0),
-                  BT_GATT_ERR(BT_ATT_ERR_NOT_SUPPORTED));
-    request[2] = operation;
-#endif
     zassert_equal(rx->write(NULL, rx, request, sizeof(request), 0, 0),
                   BT_GATT_ERR(BT_ATT_ERR_AUTHORIZATION));
     zassert_equal(rx->write(peer, rx, request, sizeof(request), 0, 0),
@@ -161,6 +155,16 @@ ZTEST(ruuvi_gatt, test_rx_validation_and_queue_ownership)
     zassert_equal(references, 4U);
     zassert_equal(releases, 3U);
     zassert_not_equal(ruuvi_gatt_request_take(&queued, K_NO_WAIT), 0);
+#if !RUUVI_HISTORY_ENABLED
+    request[0] = RE_STANDARD_DESTINATION_TEMPERATURE;
+    request[2] = RE_STANDARD_LOG_VALUE_READ;
+    zassert_equal(rx->write(peer, rx, request, sizeof(request), 0, 0), sizeof(request));
+    zassert_equal(ruuvi_gatt_request_take(&queued, K_NO_WAIT), 0);
+    zassert_mem_equal(queued.data, request, sizeof(request));
+    ruuvi_gatt_request_release(&queued);
+    zassert_equal(references, 5U);
+    zassert_equal(releases, 4U);
+#endif
 }
 
 ZTEST(ruuvi_gatt, test_password_completion_and_timeout_tickets)

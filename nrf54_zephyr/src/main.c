@@ -250,6 +250,8 @@ int main(void)
 #if RUUVI_GATT_ENABLED || defined(CONFIG_NFC_T4T_NRFXLIB)
     uint8_t device_id[8] = {0};
     bool have_device_id = false;
+    const bool history_available = DT_NODE_EXISTS(DT_NODELABEL(ruuvi_history_partition)) &&
+                                   RUUVI_HISTORY_ENABLED;
 #endif
     uint16_t sequence[6] = {0}; /* Separate legacy counters for each format. */
     ruuvi_format_t format = RUUVI_FORMAT_INVALID;
@@ -590,31 +592,24 @@ int main(void)
             int nfc_rc = ruuvi_nfc_request_take(nfc_command);
             if (nfc_rc == 0) {
                 ruuvi_log_service_abort(&nfc_service); /* New NFC write replaces an old stream. */
-#if !DT_NODE_EXISTS(DT_NODELABEL(ruuvi_history_partition)) || !RUUVI_HISTORY_ENABLED
-                if (nfc_command[2] == RE_STANDARD_LOG_VALUE_READ) {
-                    LOG_WRN("NFC log read unavailable without history partition");
-                } else
-#endif
-                {
-                    uint64_t history_now_s = 0;
+                uint64_t history_now_s = 0;
 #if DT_NODE_EXISTS(DT_NODELABEL(ruuvi_history_partition)) && RUUVI_HISTORY_ENABLED
-                    history_now_s = (uint64_t)history_base_s +
-                                    (uint64_t)k_uptime_get() / 1000U;
+                history_now_s = (uint64_t)history_base_s +
+                                (uint64_t)k_uptime_get() / 1000U;
 #endif
-                    int start_rc = ruuvi_log_service_start_with_id(&nfc_service, nfc_command,
-                                       sizeof(nfc_command), history_now_s, k_uptime_get(),
-                                       have_device_id ? device_id : NULL);
-                    if (start_rc != 0) {
-                        LOG_WRN("NFC command rejected: %d", start_rc);
-                    }
-#if RUUVI_GATT_ENABLED
-                    else if (nfc_command[0] == RE_STANDARD_DESTINATION_PASSWORD &&
-                             nfc_command[2] == RE_STANDARD_VALUE_READ &&
-                             !nfc_service.password_match) {
-                        atomic_clear(&config_next);
-                    }
-#endif
+                int start_rc = ruuvi_log_service_start_with_id(&nfc_service, nfc_command,
+                                   sizeof(nfc_command), history_now_s, k_uptime_get(),
+                                   have_device_id ? device_id : NULL, history_available);
+                if (start_rc != 0) {
+                    LOG_WRN("NFC command rejected: %d", start_rc);
                 }
+#if RUUVI_GATT_ENABLED
+                else if (nfc_command[0] == RE_STANDARD_DESTINATION_PASSWORD &&
+                         nfc_command[2] == RE_STANDARD_VALUE_READ &&
+                         !nfc_service.password_match) {
+                    atomic_clear(&config_next);
+                }
+#endif
             } else if (nfc_rc != -ENOMSG) {
                 LOG_WRN("Malformed NFC NDEF command: %d", nfc_rc);
             }
@@ -738,16 +733,10 @@ int main(void)
 #if DT_NODE_EXISTS(DT_NODELABEL(ruuvi_history_partition)) && RUUVI_HISTORY_ENABLED
                     history_now_s = (uint64_t)history_base_s +
                                     (uint64_t)k_uptime_get() / 1000U;
-#else
-                    if (queued.data[2] == RE_STANDARD_LOG_VALUE_READ) {
-                        LOG_WRN("Log read unavailable without history partition");
-                        ruuvi_gatt_request_release(&queued);
-                        continue;
-                    }
 #endif
                     int start_rc = ruuvi_log_service_start_with_id(&log_service, queued.data,
                                      sizeof(queued.data), history_now_s, k_uptime_get(),
-                                     have_device_id ? device_id : NULL);
+                                     have_device_id ? device_id : NULL, history_available);
                     if (start_rc == 0) {
                         active_request = queued;
 #if DT_NODE_EXISTS(DT_NODELABEL(ruuvi_history_partition)) && RUUVI_HISTORY_ENABLED

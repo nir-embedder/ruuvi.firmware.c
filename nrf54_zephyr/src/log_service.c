@@ -30,7 +30,7 @@ bool ruuvi_log_service_active(const ruuvi_log_service_t *svc)
 int ruuvi_log_service_start_with_id(ruuvi_log_service_t *svc,
                                     const uint8_t request[RUUVI_LOG_MESSAGE_LENGTH],
                                     size_t len, uint64_t synthetic_now_s, int64_t now_ms,
-                                    const uint8_t device_id[8])
+                                    const uint8_t device_id[8], bool history_available)
 {
     int rc;
 
@@ -61,6 +61,9 @@ int ruuvi_log_service_start_with_id(ruuvi_log_service_t *svc,
             ruuvi_log_service_abort(svc);
             return rc;
         }
+        if (!history_available) {
+            svc->iterator.exhausted = true;
+        }
         svc->read = true;
     } else if (svc->destination == RE_STANDARD_DESTINATION_PASSWORD &&
                request[RE_STANDARD_OPERATION_INDEX] == RE_STANDARD_VALUE_READ) {
@@ -90,7 +93,7 @@ int ruuvi_log_service_start(ruuvi_log_service_t *svc,
                              size_t len, uint64_t synthetic_now_s, int64_t now_ms)
 {
     return ruuvi_log_service_start_with_id(svc, request, len, synthetic_now_s, now_ms,
-                                           NULL);
+                                           NULL, true);
 }
 
 int ruuvi_log_service_pump(ruuvi_log_service_t *svc, int64_t now_ms,

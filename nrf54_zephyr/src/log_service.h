@@ -12,7 +12,7 @@
 
 /* Zero-initialize before the first start. Only one request can be active at a
  * time; the caller must serialize history access for the life of a read.
- * The caller must reject log reads when the history backend is unavailable.
+ * The caller reports history availability when starting a request.
  */
 typedef struct {
     ruuvi_log_iterator_t iterator;
@@ -31,13 +31,14 @@ typedef struct {
 /* A valid 0x11 starts a stream. Unsupported writes queue an unauthorized
  * response; unsupported odd reads return -ENOTSUP. The password endpoint
  * echoes a matching 8-byte device ID and responds 0x08, otherwise 0xEA.
- * A NULL device ID disables password authorization. This is only a wire
- * response; the caller decides when the next connection is enabled.
+ * A NULL device ID disables password authorization. When history_available is
+ * false, valid log reads return a correctly addressed EOF without a flash read.
+ * This is only a wire response; the caller decides when the next connection is enabled.
  */
 int ruuvi_log_service_start_with_id(ruuvi_log_service_t *svc,
                                     const uint8_t request[RUUVI_LOG_MESSAGE_LENGTH],
                                     size_t len, uint64_t synthetic_now_s, int64_t now_ms,
-                                    const uint8_t device_id[8]);
+                                    const uint8_t device_id[8], bool history_available);
 int ruuvi_log_service_start(ruuvi_log_service_t *svc,
                              const uint8_t request[RUUVI_LOG_MESSAGE_LENGTH],
                              size_t len, uint64_t synthetic_now_s, int64_t now_ms);

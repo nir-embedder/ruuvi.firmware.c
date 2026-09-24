@@ -176,6 +176,45 @@ static void test_empty_read_and_unauthorized(void)
     assert(!ruuvi_log_service_active(&svc) && reads == 1);
 }
 
+static void test_log_read_without_history_partition(void)
+{
+    ruuvi_log_service_t svc = {0};
+    fake_tx_t tx = {0};
+    uint8_t req[11];
+
+    reset();
+    records[record_count++] = (ruuvi_history_element_t) {
+        .timestamp_s = 100, .temperature_c = 20.0f,
+        .humidity_rh = 50.0f, .pressure_pa = 101325.0f,
+    };
+    read_error = -EIO; /* No history backend must be called. */
+    request(req, RE_STANDARD_DESTINATION_ENVIRONMENTAL,
+            RE_STANDARD_LOG_VALUE_READ, 200, 100);
+    assert(ruuvi_log_service_start_with_id(&svc, req, sizeof(req), 100, 0,
+                                           NULL, false) == 0);
+    tx.busy = 1;
+    assert(ruuvi_log_service_pump(&svc, 0, send_frame, &tx) == 0);
+    check_terminal(tx.attempts[0], req[0], RE_STANDARD_LOG_VALUE_WRITE);
+    assert(ruuvi_log_service_pump(&svc, 1, send_frame, &tx) == 1);
+    check_terminal(tx.accepted[0], req[0], RE_STANDARD_LOG_VALUE_WRITE);
+    assert(!ruuvi_log_service_active(&svc) && reads == 0);
+
+    tx = (fake_tx_t) {0};
+    request(req, RE_STANDARD_DESTINATION_TEMPERATURE,
+            RE_STANDARD_LOG_VALUE_READ, 200, 100);
+    assert(ruuvi_log_service_start_with_id(&svc, req, sizeof(req), 100, 2,
+                                           NULL, false) == 0);
+    assert(ruuvi_log_service_pump(&svc, 2, send_frame, &tx) == 1);
+    check_terminal(tx.accepted[0], req[0], RE_STANDARD_LOG_VALUE_WRITE);
+    assert(reads == 0);
+
+    request(req, RE_STANDARD_DESTINATION_TEMPERATURE,
+            RE_STANDARD_LOG_VALUE_READ, 100, 100);
+    assert(ruuvi_log_service_start_with_id(&svc, req, sizeof(req), 100, 3,
+                                           NULL, false) == -EINVAL);
+    assert(!ruuvi_log_service_active(&svc) && reads == 0);
+}
+
 static void test_legacy_password_reply(void)
 {
     const uint8_t device_id[8] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88};
@@ -192,7 +231,7 @@ static void test_legacy_password_reply(void)
 
     reset();
     assert(ruuvi_log_service_start_with_id(&svc, req, sizeof(req), 0, 100,
-                                           device_id) == 0);
+                                           device_id, true) == 0);
     assert(svc.password_match && ruuvi_log_service_active(&svc));
     tx.busy = 1;
     assert(ruuvi_log_service_pump(&svc, 100, send_frame, &tx) == 0);
@@ -203,7 +242,7 @@ static void test_legacy_password_reply(void)
 
     req[10] ^= 1U;
     assert(ruuvi_log_service_start_with_id(&svc, req, sizeof(req), 0, 102,
-                                           device_id) == 0);
+                                           device_id, true) == 0);
     assert(!svc.password_match);
     assert(ruuvi_log_service_pump(&svc, 102, send_frame, &tx) == 1);
     check_terminal(tx.accepted[1], RE_STANDARD_DESTINATION_PASSWORD,
@@ -212,14 +251,14 @@ static void test_legacy_password_reply(void)
 
     req[10] ^= 1U;
     assert(ruuvi_log_service_start_with_id(&svc, req, sizeof(req), 0, 103,
-                                           NULL) == 0);
+                                            NULL, true) == 0);
     assert(!svc.password_match);
     assert(ruuvi_log_service_pump(&svc, 103, send_frame, &tx) == 1);
     check_terminal(tx.accepted[2], RE_STANDARD_DESTINATION_PASSWORD,
                    RE_STANDARD_OP_UNAUTHORIZED);
     req[2] = RE_STANDARD_VALUE_WRITE;
     assert(ruuvi_log_service_start_with_id(&svc, req, sizeof(req), 0, 104,
-                                           device_id) == 0);
+                                           device_id, true) == 0);
     assert(!svc.password_match);
     assert(ruuvi_log_service_pump(&svc, 104, send_frame, &tx) == 1);
     check_terminal(tx.accepted[3], RE_STANDARD_DESTINATION_PASSWORD,
@@ -357,6 +396,7 @@ int main(void)
 {
     test_retry_and_legacy_vector();
     test_empty_read_and_unauthorized();
+    test_log_read_without_history_partition();
     test_legacy_password_reply();
     test_motion_reads_without_motion_history();
     test_bad_requests_and_failures();
