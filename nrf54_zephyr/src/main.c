@@ -267,6 +267,9 @@ int main(void)
     if (motion_rc != 0) {
         LOG_WRN("Motion interrupt unavailable (%d); movement counter stays at zero", motion_rc);
     }
+#if !DT_NODE_HAS_STATUS(DT_ALIAS(battery0), okay)
+    LOG_WRN("No battery0 alias: beacon battery voltage remains invalid");
+#endif
 
 #if DT_NODE_EXISTS(DT_NODELABEL(ruuvi_history_partition)) && RUUVI_HISTORY_ENABLED
     uint32_t history_base_s = 0;
