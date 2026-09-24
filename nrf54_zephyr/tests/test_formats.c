@@ -53,6 +53,19 @@ static void test_rotation(void)
                              RUUVI_FORMAT_FA) == RUUVI_FORMAT_3);
 }
 
+static void test_legacy_primary_budget(void)
+{
+    /* Flags: 3 bytes; manufacturer header + company ID: 4; UUID16 AD: 4. */
+    const size_t without_uuid = 3U + 4U;
+    const size_t with_uuid = without_uuid + 4U;
+    assert(without_uuid + RE_3_DATA_LENGTH <= 31U);
+    assert(without_uuid + RE_5_DATA_LENGTH == 31U);
+    assert(with_uuid + RE_7_DATA_LENGTH == 31U);
+    assert(with_uuid + RE_C5_DATA_LENGTH == 29U);
+    assert(without_uuid + RE_FA_DATA_LENGTH == 30U);
+    assert(with_uuid + RE_8_DATA_LENGTH == 35U); /* Cannot use a legacy PDU. */
+}
+
 static ruuvi_measurement_t typical(void)
 {
     return (ruuvi_measurement_t) {
@@ -283,6 +296,7 @@ static void test_crypto_boundary(void)
 int main(void)
 {
     test_rotation();
+    test_legacy_primary_budget();
     test_plain_formats();
     test_crypto_boundary();
     return 0;

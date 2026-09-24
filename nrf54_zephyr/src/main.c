@@ -400,6 +400,7 @@ int main(void)
 #endif
 #if defined(CONFIG_NFC_T4T_NRFXLIB)
     size_t latest_payload_len = 0;
+    bool latest_primary_fits = false;
 #endif
     bool no_sensors_reported = false;
 #if RUUVI_GATT_ENABLED
@@ -517,7 +518,7 @@ int main(void)
             normal_mode = true;
         }
 #if defined(CONFIG_NFC_T4T_NRFXLIB)
-        if (nfc_field_ended && radio_allowed && have_payload) {
+        if (nfc_field_ended && radio_allowed && have_payload && latest_primary_fits) {
             ruuvi_adv_frame_t resume = {
                 .length = (uint8_t)(2U + latest_payload_len),
                 .ad_count = (uint8_t)adv_count,
@@ -812,15 +813,27 @@ int main(void)
         if (err) {
             LOG_ERR("Data format %u encoding failed: %d", (unsigned int)format, err);
         } else {
+            /* Legacy primary PDUs have 2 bytes of AD header per element. */
+            size_t primary_bytes = 2U + ad[0].data_len + 2U + 2U + payload_length;
+            if (adv_count == ARRAY_SIZE(ad)) {
+                primary_bytes += 2U + ad[2].data_len;
+            }
+            bool primary_fits = primary_bytes <= BT_GAP_ADV_MAX_ADV_DATA_LEN;
+            if (!primary_fits) {
+                LOG_ERR("Legacy primary advertisement needs %zu bytes (max %u)",
+                        primary_bytes, BT_GAP_ADV_MAX_ADV_DATA_LEN);
+                ruuvi_ui_error(true);
+            }
 #if defined(CONFIG_NFC_T4T_NRFXLIB) || (RUUVI_GATT_ENABLED && defined(CONFIG_MCUMGR_TRANSPORT_BT))
             have_payload = true;
 #endif
 #if defined(CONFIG_NFC_T4T_NRFXLIB)
             latest_payload_len = payload_length;
+            latest_primary_fits = primary_fits;
 #endif
             bool heartbeat_ok = false;
 
-            if (radio_allowed) {
+            if (radio_allowed && primary_fits) {
                 ruuvi_adv_frame_t frame = {
                     .length = (uint8_t)(2U + payload_length),
                     .ad_count = (uint8_t)adv_count,
@@ -841,7 +854,7 @@ int main(void)
                 err = ruuvi_gatt_notify(&manufacturer[2], 18U);
                 if (err) {
                     LOG_ERR("GATT notification failed: %d", err);
-                } else if (atomic_get(&connected)) {
+                } else if (primary_fits && atomic_get(&connected)) {
                     heartbeat_ok = true;
                 }
             }
@@ -849,7 +862,7 @@ int main(void)
 #if defined(CONFIG_NFC_T4T_NRFXLIB)
             int nfc_rc = ruuvi_nfc_update(&manufacturer[2], payload_length);
             if (nfc_rc == 0) {
-                heartbeat_ok = true;
+                heartbeat_ok = primary_fits;
             } else if (nfc_rc != -EAGAIN) {
                 LOG_WRN("NFC payload update failed: %d", nfc_rc);
             }
