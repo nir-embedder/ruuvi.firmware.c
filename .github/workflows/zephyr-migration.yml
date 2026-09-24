@@ -149,6 +149,8 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          from zipfile import ZipFile
+          import json
           import re
 
           layouts = {
@@ -189,6 +191,23 @@ jobs:
               assert "CONFIG_MCUMGR_TRANSPORT_BT_PERM_RW_ENCRYPT=y" in app_config
               assert ("CONFIG_NFC_T4T_NRFXLIB=y" in app_config) == (candidate == "dk-dfu-nfc")
               assert "CONFIG_BOOT_SIGNATURE_TYPE_ECDSA_P256=y" in boot_config
+
+              signed = (base / "nrf54_zephyr/zephyr/zephyr.signed.bin").read_bytes()
+              with ZipFile(base / "dfu_application.zip") as package:
+                  if sorted(package.namelist()) != ["manifest.json", "nrf54_zephyr.signed.bin"]:
+                      raise SystemExit(f"{candidate}: unexpected DFU ZIP members")
+                  if package.read("nrf54_zephyr.signed.bin") != signed:
+                      raise SystemExit(f"{candidate}: packaged image differs from signed build")
+                  manifest = json.loads(package.read("manifest.json"))
+              entry = manifest["files"]
+              board = "nrf54l15dk" if candidate == "dk-dfu-nfc" else "nrf54l15tag"
+              if (manifest["format-version"] != 1 or manifest["name"] != "nrf54_zephyr" or
+                      len(entry) != 1 or entry[0]["file"] != "nrf54_zephyr.signed.bin" or
+                      entry[0]["board"] != board or entry[0]["type"] != "application" or
+                      entry[0]["version_MCUBOOT"] != "0.1.0+0" or
+                      entry[0]["load_address"] != expected["slot0_partition"][0] or
+                      entry[0]["size"] != len(signed)):
+                  raise SystemExit(f"{candidate}: DFU manifest does not describe signed build")
           PY
           for candidate in dk-dfu-nfc tag-history; do
             python3 bootloader/mcuboot/scripts/imgtool.py verify \
