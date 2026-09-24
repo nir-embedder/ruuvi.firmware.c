@@ -23,6 +23,7 @@ ZTEST(ruuvi_ui, test_feedback_and_button_windows)
     zassert_equal(ruuvi_ui_init(), 0);
     k_sleep(K_MSEC(70)); /* Settle the initial button debounce. */
     check_leds(0, 0, 0);
+    zassert_not_equal(k_sem_take(ruuvi_ui_event_sem(), K_NO_WAIT), 0);
 
     ruuvi_ui_error(true);
     check_leds(0, 1, 0);
@@ -48,6 +49,11 @@ ZTEST(ruuvi_ui, test_feedback_and_button_windows)
     k_sleep(K_MSEC(100));
     check_leds(1, 0, 1);
     zassert_equal(gpio_emul_input_set(button.port, button.pin, 0), 0);
+    struct k_poll_event event;
+    k_poll_event_init(&event, K_POLL_TYPE_SEM_AVAILABLE, K_POLL_MODE_NOTIFY_ONLY,
+                      ruuvi_ui_event_sem());
+    zassert_equal(k_poll(&event, 1, K_MSEC(1000)), 0);
+    zassert_equal(k_sem_take(ruuvi_ui_event_sem(), K_NO_WAIT), 0);
     k_sleep(K_MSEC(100));
     check_leds(1, 0, 0);
     zassert_true(ruuvi_ui_config_pending());
@@ -70,25 +76,32 @@ ZTEST(ruuvi_ui, test_feedback_and_button_windows)
     k_sleep(K_MSEC(100));
     zassert_true(ruuvi_ui_config_claim()); /* Another release opens a new window. */
     zassert_false(ruuvi_ui_config_claim());
+    zassert_equal(k_sem_take(ruuvi_ui_event_sem(), K_NO_WAIT), 0);
+    zassert_not_equal(k_sem_take(ruuvi_ui_event_sem(), K_NO_WAIT), 0);
 
     zassert_equal(gpio_emul_input_set(button.port, button.pin, 1), 0);
     k_sleep(K_MSEC(100));
     zassert_equal(gpio_emul_input_set(button.port, button.pin, 0), 0);
     k_sleep(K_MSEC(100));
     zassert_true(ruuvi_ui_config_pending());
+    zassert_equal(k_sem_take(ruuvi_ui_event_sem(), K_NO_WAIT), 0);
     k_sleep(K_SECONDS(59));
     zassert_true(ruuvi_ui_config_pending());
+    zassert_not_equal(k_sem_take(ruuvi_ui_event_sem(), K_NO_WAIT), 0);
     k_sleep(K_SECONDS(2));
     zassert_false(ruuvi_ui_config_pending());
     zassert_false(ruuvi_ui_config_claim());
+    zassert_equal(k_sem_take(ruuvi_ui_event_sem(), K_NO_WAIT), 0);
 
     zassert_equal(gpio_emul_input_set(button.port, button.pin, 1), 0);
     k_sleep(K_MSEC(5200));
     zassert_true(ruuvi_ui_recovery_requested());
+    zassert_equal(k_sem_take(ruuvi_ui_event_sem(), K_NO_WAIT), 0);
     zassert_false(ruuvi_ui_config_pending());
     zassert_equal(gpio_emul_input_set(button.port, button.pin, 0), 0);
     k_sleep(K_MSEC(100));
     check_leds(0, 0, 0);
+    zassert_not_equal(k_sem_take(ruuvi_ui_event_sem(), K_NO_WAIT), 0);
 }
 
 ZTEST_SUITE(ruuvi_ui, NULL, NULL, NULL, NULL, NULL);

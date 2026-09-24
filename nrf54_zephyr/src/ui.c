@@ -13,6 +13,7 @@
 
 static atomic_t config_pending;
 static atomic_t recovery_requested;
+static K_SEM_DEFINE(ui_events, 0, 1);
 static K_MUTEX_DEFINE(feedback_lock);
 static bool activity_signal;
 static bool startup_signal;
@@ -76,6 +77,7 @@ static void config_expired(struct k_work *work)
 {
     ARG_UNUSED(work);
     atomic_clear(&config_pending);
+    k_sem_give(&ui_events);
 }
 
 static void long_pressed(struct k_work *work)
@@ -85,6 +87,7 @@ static void long_pressed(struct k_work *work)
         atomic_set(&recovery_requested, 1);
         atomic_clear(&config_pending);
         (void)k_work_cancel_delayable(&config_timeout);
+        k_sem_give(&ui_events);
     }
 }
 
@@ -120,6 +123,7 @@ static void button_debounced(struct k_work *work)
             atomic_set(&config_pending, 1);
             (void)k_work_reschedule(&config_timeout, K_MSEC(CONFIG_WINDOW_MS));
         }
+        k_sem_give(&ui_events);
     }
 }
 
@@ -133,10 +137,16 @@ static void button_changed(const struct device *dev, struct gpio_callback *cb,
 }
 #endif
 
+struct k_sem *ruuvi_ui_event_sem(void)
+{
+    return &ui_events;
+}
+
 int ruuvi_ui_init(void)
 {
     int err;
 
+    k_sem_reset(&ui_events);
     atomic_clear(&config_pending);
     atomic_clear(&recovery_requested);
     activity_signal = false;

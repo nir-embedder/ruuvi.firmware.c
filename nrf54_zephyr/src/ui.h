@@ -3,6 +3,11 @@
 
 #include <stdbool.h>
 
+struct k_sem;
+
+/* UI workqueue events wake the main poll loop; state is read separately. */
+struct k_sem *ruuvi_ui_event_sem(void);
+
 /* Missing sw0/led0/led1/led2 aliases are supported. No storage or boot action is performed. */
 int ruuvi_ui_init(void);
 void ruuvi_ui_activity(bool on);

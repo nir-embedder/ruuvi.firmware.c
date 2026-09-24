@@ -698,11 +698,13 @@ int main(void)
             next_event_ms = fast_deadline_ms;
         }
         if (now < next_event_ms) {
-            struct k_poll_event events[1 + RUUVI_GATT_ENABLED +
+            struct k_poll_event events[2 + RUUVI_GATT_ENABLED +
                                        IS_ENABLED(CONFIG_NFC_T4T_NRFXLIB)];
             size_t event_count = 0;
             k_poll_event_init(&events[event_count++], K_POLL_TYPE_SEM_AVAILABLE,
                               K_POLL_MODE_NOTIFY_ONLY, &adv_sent);
+            k_poll_event_init(&events[event_count++], K_POLL_TYPE_SEM_AVAILABLE,
+                              K_POLL_MODE_NOTIFY_ONLY, ruuvi_ui_event_sem());
 #if RUUVI_GATT_ENABLED
             k_poll_event_init(&events[event_count++], K_POLL_TYPE_MSGQ_DATA_AVAILABLE,
                               K_POLL_MODE_NOTIFY_ONLY, ruuvi_gatt_request_queue());
@@ -716,6 +718,7 @@ int main(void)
                 LOG_WRN("BLE/NFC event wait failed: %d", poll_rc);
             }
             (void)k_sem_take(&adv_sent, K_NO_WAIT);
+            (void)k_sem_take(ruuvi_ui_event_sem(), K_NO_WAIT);
 #if defined(CONFIG_NFC_T4T_NRFXLIB)
             (void)k_sem_take(ruuvi_nfc_event_sem(), K_NO_WAIT);
 #endif
