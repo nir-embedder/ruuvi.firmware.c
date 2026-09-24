@@ -139,6 +139,18 @@ static void test_plain_formats(void)
     assert(ruuvi_format_encode(RUUVI_FORMAT_5, &data, NULL, buffer, &size) == 0);
     assert(buffer[RE_5_OFFSET_SEQCTR_MSB] == 0 && buffer[RE_5_OFFSET_SEQCTR_LSB] == 0);
     assert(buffer[RE_5_OFFSET_MVTCTR] == 0);
+
+    /* The legacy motion count is 32 bits before every format-specific modulo. */
+    data.movement_count = 65536U;
+    size = sizeof(buffer);
+    assert(ruuvi_format_encode(RUUVI_FORMAT_5, &data, NULL, buffer, &size) == 0);
+    assert(buffer[RE_5_OFFSET_MVTCTR] == 1U);
+    size = sizeof(buffer);
+    assert(ruuvi_format_encode(RUUVI_FORMAT_7, &data, NULL, buffer, &size) == 0);
+    assert(buffer[RE_7_OFFSET_MOTION_CNT] == 1U);
+    size = sizeof(buffer);
+    assert(ruuvi_format_encode(RUUVI_FORMAT_C5, &data, NULL, buffer, &size) == 0);
+    assert(buffer[RE_C5_OFFSET_MVTCTR] == 1U);
 }
 
 /* Fixture simulates the endpoint's callback interface; it does not encrypt.
@@ -233,6 +245,18 @@ static void test_crypto_boundary(void)
     size = sizeof(output);
     assert(ruuvi_format_encode(RUUVI_FORMAT_8, &data, &crypto, output, &size) == 0);
     assert(memcmp(output, expected8, size) == 0);
+
+    uint8_t wrapped_motion[sizeof(clear8)];
+    memcpy(wrapped_motion, clear8, sizeof(wrapped_motion));
+    wrapped_motion[8] = 0;
+    wrapped_motion[9] = 1; /* 65536 events modulo 65535, before encryption. */
+    data.device_id = 0;
+    data.movement_count = 65536U;
+    fixture_cleartext = wrapped_motion;
+    fixture_key = derived_key;
+    size = sizeof(output);
+    assert(ruuvi_format_encode(RUUVI_FORMAT_8, &data, &crypto, output, &size) == 0);
+    assert(size == sizeof(expected8) && output[0] == 0x08);
 
     static const uint8_t clear_fa[16] = {
         0x29, 0x1A, 0x1E, 0xCE, 0x1E, 0xFC, 0x18, 0xF9,

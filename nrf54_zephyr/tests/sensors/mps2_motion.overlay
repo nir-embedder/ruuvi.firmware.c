@@ -1,0 +1,10 @@
+/ {
+    motion_test: motion-test {
+        compatible = "ruuvi,motion-test";
+        status = "okay";
+    };
+
+    aliases {
+        accel0 = &motion_test;
+    };
+};

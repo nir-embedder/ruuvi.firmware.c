@@ -1,0 +1,3 @@
+description: Mock motion-trigger accelerometer for QEMU-only application tests
+compatible: "ruuvi,motion-test"
+include: base.yaml

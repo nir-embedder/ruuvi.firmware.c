@@ -60,4 +60,5 @@ jobs:
             -p qemu_cortex_m3 -O build/twister-cm3 -i
           west twister -T nrf54_zephyr/tests/history_flash \
             -T nrf54_zephyr/tests/ui \
+            -T nrf54_zephyr/tests/sensors \
             -p mps2/an385 -O build/twister-mps2 -i

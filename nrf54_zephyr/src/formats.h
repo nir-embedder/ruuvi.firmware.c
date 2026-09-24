@@ -32,7 +32,7 @@ typedef struct {
     float luminosity_lux;
     float color_temp_k;
     uint16_t measurement_count;
-    uint16_t movement_count;
+    uint32_t movement_count; /* Legacy interrupt counter before format-specific modulo. */
     uint8_t motion_intensity;
     bool motion_detected;
     bool presence_detected;

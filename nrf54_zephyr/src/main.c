@@ -262,6 +262,10 @@ int main(void)
         return err;
     }
     ruuvi_ui_error(true);
+    int motion_rc = ruuvi_sensor_motion_init();
+    if (motion_rc != 0) {
+        LOG_WRN("Motion interrupt unavailable (%d); movement counter stays at zero", motion_rc);
+    }
 
 #if DT_NODE_EXISTS(DT_NODELABEL(ruuvi_history_partition)) && RUUVI_HISTORY_ENABLED
     uint32_t history_base_s = 0;
@@ -799,7 +803,7 @@ int main(void)
             .luminosity_lux = NAN,
             .color_temp_k = NAN,
             .measurement_count = sequence[slot],
-            .movement_count = 0, /* Motion interrupts have not been connected. */
+            .movement_count = ruuvi_sensor_motion_count_get(),
             .address = address,
             .tx_power = RE_5_INVALID_POWER, /* Controller TX power is unmeasured. */
         };
