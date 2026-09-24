@@ -7,6 +7,8 @@
 int ruuvi_ui_init(void);
 void ruuvi_ui_activity(bool on);
 void ruuvi_ui_error(bool on);
+/* After the first accepted heartbeat, clear boot error and signal success for 1 s. */
+void ruuvi_ui_startup_success(void);
 /* When led2 exists, activity moves from led0 to led2 in configuration mode. */
 void ruuvi_ui_configuration(bool on);
 /* Set on short release until claimed, expired after 60 seconds or cancelled by recovery. */

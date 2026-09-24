@@ -255,6 +255,7 @@ int main(void)
     uint16_t sequence[6] = {0}; /* Separate legacy counters for each format. */
     ruuvi_format_t format = RUUVI_FORMAT_INVALID;
     bool recovery_reported = false;
+    bool startup_reported = false;
     int err = ruuvi_ui_init();
 
     if (err) {
@@ -388,7 +389,6 @@ int main(void)
         LOG_ERR("Creating BLE advertising set failed: %d", err);
         return err;
     }
-    ruuvi_ui_error(false);
     bool normal_mode = false;
     bool configured_fast = true;
     bool configured_connectable = RUUVI_GATT_ENABLED != 0;
@@ -854,6 +854,10 @@ int main(void)
                 LOG_WRN("NFC payload update failed: %d", nfc_rc);
             }
 #endif
+            if (heartbeat_ok && !startup_reported && !ruuvi_ui_recovery_requested()) {
+                ruuvi_ui_startup_success();
+                startup_reported = true;
+            }
 #if DT_NODE_HAS_STATUS(DT_ALIAS(watchdog0), okay)
             if (heartbeat_ok) {
                 err = wdt_feed(wdt, wdt_channel);

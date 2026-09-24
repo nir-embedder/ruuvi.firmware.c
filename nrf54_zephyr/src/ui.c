@@ -9,11 +9,13 @@
 #define DEBOUNCE_MS 50
 #define LONG_PRESS_MS 5000
 #define CONFIG_WINDOW_MS 60000
+#define STARTUP_OK_MS 1000
 
 static atomic_t config_pending;
 static atomic_t recovery_requested;
 static K_MUTEX_DEFINE(feedback_lock);
 static bool activity_signal;
+static bool startup_signal;
 static bool configuration_signal;
 
 #if DT_NODE_HAS_STATUS(DT_ALIAS(led0), okay)
@@ -36,20 +38,31 @@ static int64_t pressed_at;
 static void update_feedback(void)
 {
 #if DT_NODE_HAS_STATUS(DT_ALIAS(led0), okay)
-    (void)gpio_pin_set_dt(&activity_led, activity_signal
+    (void)gpio_pin_set_dt(&activity_led, (activity_signal || startup_signal)
 #if DT_NODE_HAS_STATUS(DT_ALIAS(led2), okay)
                           && !configuration_signal
 #endif
     );
 #endif
 #if DT_NODE_HAS_STATUS(DT_ALIAS(led2), okay)
-    bool blue_on = activity_signal && configuration_signal;
+    bool blue_on = (activity_signal || startup_signal) && configuration_signal;
 #if DT_NODE_HAS_STATUS(DT_ALIAS(sw0), okay)
     blue_on = blue_on || button_pressed;
 #endif
     (void)gpio_pin_set_dt(&configuration_led, blue_on);
 #endif
 }
+
+static void startup_finished(struct k_work *work)
+{
+    ARG_UNUSED(work);
+    k_mutex_lock(&feedback_lock, K_FOREVER);
+    startup_signal = false;
+    update_feedback();
+    k_mutex_unlock(&feedback_lock);
+}
+
+static K_WORK_DELAYABLE_DEFINE(startup_feedback, startup_finished);
 
 #if DT_NODE_HAS_STATUS(DT_ALIAS(sw0), okay)
 static void config_expired(struct k_work *work);
@@ -127,6 +140,7 @@ int ruuvi_ui_init(void)
     atomic_clear(&config_pending);
     atomic_clear(&recovery_requested);
     activity_signal = false;
+    startup_signal = false;
     configuration_signal = false;
 #if DT_NODE_HAS_STATUS(DT_ALIAS(led0), okay)
     if (!gpio_is_ready_dt(&activity_led)) {
@@ -187,6 +201,16 @@ void ruuvi_ui_activity(bool on)
     activity_signal = on;
     update_feedback();
     k_mutex_unlock(&feedback_lock);
+}
+
+void ruuvi_ui_startup_success(void)
+{
+    ruuvi_ui_error(false);
+    k_mutex_lock(&feedback_lock, K_FOREVER);
+    startup_signal = true;
+    update_feedback();
+    k_mutex_unlock(&feedback_lock);
+    (void)k_work_reschedule(&startup_feedback, K_MSEC(STARTUP_OK_MS));
 }
 
 void ruuvi_ui_configuration(bool on)

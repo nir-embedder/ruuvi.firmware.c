@@ -24,6 +24,16 @@ ZTEST(ruuvi_ui, test_feedback_and_button_windows)
     k_sleep(K_MSEC(70)); /* Settle the initial button debounce. */
     check_leds(0, 0, 0);
 
+    ruuvi_ui_error(true);
+    check_leds(0, 1, 0);
+    ruuvi_ui_startup_success();
+    check_leds(1, 0, 0);
+    ruuvi_ui_activity(true);
+    ruuvi_ui_activity(false);
+    check_leds(1, 0, 0); /* A heartbeat cannot end the startup indication early. */
+    k_sleep(K_MSEC(1100));
+    check_leds(0, 0, 0);
+
     ruuvi_ui_activity(true);
     check_leds(1, 0, 0);
     ruuvi_ui_configuration(true);
