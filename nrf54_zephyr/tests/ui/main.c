@@ -72,6 +72,17 @@ ZTEST(ruuvi_ui, test_feedback_and_button_windows)
     zassert_false(ruuvi_ui_config_claim());
 
     zassert_equal(gpio_emul_input_set(button.port, button.pin, 1), 0);
+    k_sleep(K_MSEC(100));
+    zassert_equal(gpio_emul_input_set(button.port, button.pin, 0), 0);
+    k_sleep(K_MSEC(100));
+    zassert_true(ruuvi_ui_config_pending());
+    k_sleep(K_SECONDS(59));
+    zassert_true(ruuvi_ui_config_pending());
+    k_sleep(K_SECONDS(2));
+    zassert_false(ruuvi_ui_config_pending());
+    zassert_false(ruuvi_ui_config_claim());
+
+    zassert_equal(gpio_emul_input_set(button.port, button.pin, 1), 0);
     k_sleep(K_MSEC(5200));
     zassert_true(ruuvi_ui_recovery_requested());
     zassert_false(ruuvi_ui_config_pending());
