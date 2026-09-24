@@ -1,0 +1,14 @@
+manifest:
+  projects:
+    - name: zephyr
+      url: https://github.com/zephyrproject-rtos/zephyr
+      revision: v4.4.0
+      import:
+        name-allowlist:
+          - hal_nordic
+          - cmsis
+          - cmsis_6
+          - mbedtls
+          - tf-psa-crypto
+  self:
+    path: nrf54_zephyr

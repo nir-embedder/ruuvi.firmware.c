@@ -1,0 +1,61 @@
+name: Zephyr migration candidate
+
+on: [push, pull_request, workflow_dispatch]
+
+permissions:
+  contents: read
+
+jobs:
+  source-and-simulator:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out legacy submodules and Zephyr port
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          path: app
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+
+      - name: Install host test and QEMU dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libmbedtls-dev qemu-system-arm
+
+      - name: Run portable legacy parity vectors
+        run: |
+          cmake -S app/nrf54_zephyr/tests -B host-build -DCMAKE_BUILD_TYPE=Release
+          cmake --build host-build -j2
+          test -x host-build/test_aes
+          ctest --test-dir host-build --output-on-failure
+
+      - name: Set up upstream Zephyr v4.4.0
+        uses: zephyrproject-rtos/action-zephyr-setup@be8136a8bba01580485d98b7ad2d32477c36a49a # v1
+        with:
+          base-path: app
+          app-path: nrf54_zephyr
+          toolchains: arm-zephyr-eabi
+
+      - name: Build DK and TAG-history candidates
+        working-directory: app
+        run: |
+          west build -b nrf54l15dk/nrf54l15/cpuapp -d build/dk nrf54_zephyr
+          west build -b nrf54l15tag/nrf54l15/cpuapp -d build/tag-history \
+            --extra-conf nrf54_zephyr/nrf54l15tag.conf \
+            --extra-conf nrf54_zephyr/nrf54l15tag_history.conf \
+            --extra-dtc-overlay nrf54_zephyr/nrf54l15tag.overlay \
+            --extra-dtc-overlay nrf54_zephyr/nrf54l15tag_history.overlay \
+            nrf54_zephyr
+
+      - name: Run AES, history, NFC and UI simulator cases
+        working-directory: app
+        run: |
+          west twister -T nrf54_zephyr/tests/aes_vector \
+            -T nrf54_zephyr/tests/history_flash \
+            -T nrf54_zephyr/tests/nfc_codec \
+            -T nrf54_zephyr/tests/ui \
+            -p qemu_cortex_m3 -p mps2/an385 -O build/twister -i

@@ -3,6 +3,11 @@
 **/.ccls-cache/
 **/build/
 **/compile_commands.json
+# Local west workspace created by nrf54_zephyr/west.yml.
+/.west/
+/zephyr/
+/modules/
+/bootloader/
 # The original nested copy has pre-migration paths; the root manifest is authoritative.
 /nrf52_oldsdk/.gitmodules
 *.pem
