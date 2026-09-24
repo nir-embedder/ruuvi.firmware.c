@@ -8,6 +8,7 @@
 #include <zephyr/storage/flash_map.h>
 #endif
 
+#include "history.h"
 #include "history_flash.h"
 #include "history_settings.h"
 
@@ -93,6 +94,49 @@ ZTEST(ruuvi_history_flash, test_invalid_environment_sample_survives_restart)
     zassert_true(isnan(recovered.storage[0].temperature_c));
     zassert_true(isnan(recovered.storage[0].humidity_rh));
     zassert_true(isnan(recovered.storage[0].pressure_pa));
+}
+
+ZTEST(ruuvi_history_flash, test_manager_recovers_committed_samples)
+{
+    ruuvi_history_element_t first = {
+        .timestamp_s = 300, .temperature_c = 20.5f,
+        .humidity_rh = 40.0f, .pressure_pa = 101325.0f,
+    };
+    ruuvi_history_element_t second = {
+        .timestamp_s = 600, .temperature_c = 21.25f,
+        .humidity_rh = 41.0f, .pressure_pa = 100000.0f,
+    };
+    ruuvi_history_element_t result = {0};
+    uint32_t latest = 0;
+
+    zassert_equal(ruuvi_history_init(), 0);
+    zassert_equal(ruuvi_history_clear(), 0);
+    zassert_equal(ruuvi_history_process(&first), 1);
+    zassert_equal(ruuvi_history_process(&second), 1);
+    zassert_equal(ruuvi_history_flush(), 0);
+
+    zassert_equal(ruuvi_history_init(), 0); /* Simulate reboot, not a power cut. */
+    zassert_equal(ruuvi_history_latest_timestamp(&latest), 0);
+    zassert_equal(latest, second.timestamp_s);
+    zassert_equal(ruuvi_history_read(0, 0, &result), 0);
+    zassert_equal(result.timestamp_s, first.timestamp_s);
+    zassert_equal(result.temperature_c, first.temperature_c);
+    zassert_equal(result.humidity_rh, first.humidity_rh);
+    zassert_equal(result.pressure_pa, first.pressure_pa);
+    zassert_equal(ruuvi_history_read(0, 1, &result), 0);
+    zassert_equal(result.timestamp_s, second.timestamp_s);
+    zassert_equal(result.temperature_c, second.temperature_c);
+    zassert_equal(result.humidity_rh, second.humidity_rh);
+    zassert_equal(result.pressure_pa, second.pressure_pa);
+    zassert_equal(ruuvi_history_read(0, 2, &result), -ENOENT);
+
+    first.timestamp_s = 900;
+    zassert_equal(ruuvi_history_process(&first), 1);
+    zassert_equal(ruuvi_history_init(), 0); /* Unflushed RAM sample must be lost. */
+    zassert_equal(ruuvi_history_latest_timestamp(&latest), 0);
+    zassert_equal(latest, second.timestamp_s);
+    zassert_equal(ruuvi_history_read(0, 2, &result), -ENOENT);
+    zassert_equal(ruuvi_history_clear(), 0);
 }
 
 ZTEST(ruuvi_history_flash, test_config_nvs_survives_history_clear)
