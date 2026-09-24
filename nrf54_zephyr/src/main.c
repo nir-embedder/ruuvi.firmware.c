@@ -794,6 +794,14 @@ int main(void)
                              ? RE_7_SEQCTR_MAX : RE_5_SEQCTR_MAX;
         sequence[slot] = (sequence[slot] >= max_count) ? 0 : sequence[slot] + 1;
 
+        int8_t tx_power_dbm = RE_5_INVALID_POWER;
+        struct bt_le_ext_adv_info adv_info;
+        if (bt_le_ext_adv_get_info(advertiser, &adv_info) == 0 &&
+            adv_info.tx_power >= RE_5_TXPWR_MIN &&
+            adv_info.tx_power <= RE_5_TXPWR_MAX) {
+            tx_power_dbm = adv_info.tx_power;
+        }
+
         const ruuvi_measurement_t reading = {
             .humidity_rh = sample.humidity_rh,
             .pressure_pa = sample.pressure_pa,
@@ -807,7 +815,7 @@ int main(void)
             .measurement_count = sequence[slot],
             .movement_count = ruuvi_sensor_motion_count_get(),
             .address = address,
-            .tx_power = RE_5_INVALID_POWER, /* Controller TX power is unmeasured. */
+            .tx_power = tx_power_dbm, /* HCI-selected value, not a measured RF level. */
         };
         size_t payload_length = RUUVI_FORMAT_MAX_LENGTH;
         memset(&manufacturer[2], 0, payload_length);
