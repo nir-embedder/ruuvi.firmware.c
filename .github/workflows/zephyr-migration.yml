@@ -52,7 +52,7 @@ jobs:
             --extra-dtc-overlay "$APP/nrf54l15tag_history.overlay" \
             "$APP"
 
-      - name: Run AES, history, NFC and UI simulator cases
+      - name: Run AES, history, NFC, UI and sensor simulator cases
         working-directory: app
         run: |
           west twister -T nrf54_zephyr/tests/aes_vector \
@@ -62,3 +62,32 @@ jobs:
             -T nrf54_zephyr/tests/ui \
             -T nrf54_zephyr/tests/sensors \
             -p mps2/an385 -O build/twister-mps2 -i
+
+      - name: Require executed simulator coverage
+        working-directory: app
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          expected = {
+              "twister-cm3": {"ruuvi.aes_vector": 1, "ruuvi.nfc_codec": 3},
+              "twister-mps2": {
+                  "ruuvi.history_flash.simulator": 4,
+                  "ruuvi.ui.gpio_emulator": 1,
+                  "ruuvi.sensors.motion_trigger": 3,
+              },
+          }
+          for output, suites in expected.items():
+              report = json.loads((Path("build") / output / "twister.json").read_text())
+              actual = {suite["name"]: suite for suite in report["testsuites"]}
+              if len(actual) != len(report["testsuites"]) or actual.keys() != suites.keys():
+                  raise SystemExit(f"Unexpected or missing {output} suites: {list(actual)}")
+              for name, count in suites.items():
+                  suite = actual[name]
+                  cases = suite["testcases"]
+                  if (suite["status"] != "passed" or not suite["runnable"] or
+                          len(cases) != count or
+                          any(case["status"] != "passed" for case in cases)):
+                      raise SystemExit(f"{output}/{name} did not execute {count} passing cases")
+          PY
