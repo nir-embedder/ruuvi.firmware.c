@@ -43,19 +43,21 @@ jobs:
       - name: Build DK and TAG-history candidates
         working-directory: app
         run: |
-          west build -b nrf54l15dk/nrf54l15/cpuapp -d build/dk nrf54_zephyr
+          APP="$PWD/nrf54_zephyr"
+          west build -b nrf54l15dk/nrf54l15/cpuapp -d build/dk "$APP"
           west build -b nrf54l15tag/nrf54l15/cpuapp -d build/tag-history \
-            --extra-conf nrf54_zephyr/nrf54l15tag.conf \
-            --extra-conf nrf54_zephyr/nrf54l15tag_history.conf \
-            --extra-dtc-overlay nrf54_zephyr/nrf54l15tag.overlay \
-            --extra-dtc-overlay nrf54_zephyr/nrf54l15tag_history.overlay \
-            nrf54_zephyr
+            --extra-conf "$APP/nrf54l15tag.conf" \
+            --extra-conf "$APP/nrf54l15tag_history.conf" \
+            --extra-dtc-overlay "$APP/nrf54l15tag.overlay" \
+            --extra-dtc-overlay "$APP/nrf54l15tag_history.overlay" \
+            "$APP"
 
       - name: Run AES, history, NFC and UI simulator cases
         working-directory: app
         run: |
           west twister -T nrf54_zephyr/tests/aes_vector \
-            -T nrf54_zephyr/tests/history_flash \
             -T nrf54_zephyr/tests/nfc_codec \
+            -p qemu_cortex_m3 -O build/twister-cm3 -i
+          west twister -T nrf54_zephyr/tests/history_flash \
             -T nrf54_zephyr/tests/ui \
-            -p qemu_cortex_m3 -p mps2/an385 -O build/twister -i
+            -p mps2/an385 -O build/twister-mps2 -i
