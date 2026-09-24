@@ -95,6 +95,9 @@ BUILD_ASSERT(DT_REG_ADDR(DT_NODELABEL(storage_partition)) >=
 
 static atomic_t connected;
 static atomic_t advertising;
+#if RUUVI_GATT_ENABLED
+static atomic_t connection_recycled;
+#endif
 
 static void on_adv_sent(struct bt_le_ext_adv *adv, struct bt_le_ext_adv_sent_info *info)
 {
@@ -104,8 +107,20 @@ static void on_adv_sent(struct bt_le_ext_adv *adv, struct bt_le_ext_adv_sent_inf
     k_sem_give(&adv_sent);
 }
 
+static void on_adv_connected(struct bt_le_ext_adv *adv,
+                             struct bt_le_ext_adv_connected_info *info)
+{
+    ARG_UNUSED(adv);
+    ARG_UNUSED(info);
+    atomic_set(&connected, 1);
+    k_msgq_purge(&adv_queue);
+    atomic_clear(&advertising);
+    k_sem_give(&adv_sent);
+}
+
 static const struct bt_le_ext_adv_cb adv_callbacks = {
     .sent = on_adv_sent,
+    .connected = on_adv_connected,
 };
 
 #if RUUVI_GATT_ENABLED
@@ -135,7 +150,6 @@ static void disconnect_for_config(struct bt_conn *conn, void *user_data)
 static void on_connected(struct bt_conn *conn, uint8_t status)
 {
     ARG_UNUSED(conn);
-    atomic_clear(&advertising); /* Connectable legacy advertising stops on connection. */
     if (status == 0) {
         k_msgq_purge(&adv_queue);
         bool in_window = atomic_get(&config_next) != 0 &&
@@ -147,6 +161,9 @@ static void on_connected(struct bt_conn *conn, uint8_t status)
         if (in_window) {
             LOG_INF("Configuration window connection active; writes remain unsupported");
         }
+    } else {
+        atomic_clear(&advertising);
+        k_sem_give(&adv_sent);
     }
 }
 
@@ -156,13 +173,20 @@ static void on_disconnected(struct bt_conn *conn, uint8_t reason)
     ARG_UNUSED(reason);
     atomic_clear(&config_current);
     atomic_clear(&connected);
-    atomic_clear(&advertising);
     k_msgq_purge(&adv_queue);
+    k_sem_give(&adv_sent); /* Wake main to stop any nonconnectable set. */
+}
+
+static void on_connection_recycled(void)
+{
+    atomic_set(&connection_recycled, 1);
+    k_sem_give(&adv_sent);
 }
 
 BT_CONN_CB_DEFINE(ruuvi_connections) = {
     .connected = on_connected,
     .disconnected = on_disconnected,
+    .recycled = on_connection_recycled,
 };
 #endif
 
@@ -184,6 +208,14 @@ int main(void)
         BT_LE_ADV_PARAM_INIT(adv_options, APP_FAST_ADV_UNITS, APP_FAST_ADV_UNITS, NULL);
     const struct bt_le_adv_param normal_adv =
         BT_LE_ADV_PARAM_INIT(adv_options, APP_NORMAL_ADV_UNITS, APP_NORMAL_ADV_UNITS, NULL);
+#if RUUVI_GATT_ENABLED
+    const struct bt_le_adv_param fast_broadcast =
+        BT_LE_ADV_PARAM_INIT(BT_LE_ADV_OPT_USE_IDENTITY,
+                             APP_FAST_ADV_UNITS, APP_FAST_ADV_UNITS, NULL);
+    const struct bt_le_adv_param normal_broadcast =
+        BT_LE_ADV_PARAM_INIT(BT_LE_ADV_OPT_USE_IDENTITY,
+                             APP_NORMAL_ADV_UNITS, APP_NORMAL_ADV_UNITS, NULL);
+#endif
     struct bt_le_ext_adv *advertiser = NULL;
     ruuvi_adv_frame_t on_air = {0};
     uint8_t manufacturer[2 + RUUVI_FORMAT_MAX_LENGTH] = { 0x99, 0x04 };
@@ -344,6 +376,9 @@ int main(void)
         return err;
     }
 #endif
+#if RUUVI_GATT_ENABLED
+    atomic_set(&connection_recycled, 1);
+#endif
     err = bt_le_ext_adv_create(&fast_adv, &adv_callbacks, &advertiser);
     if (err != 0) {
         LOG_ERR("Creating BLE advertising set failed: %d", err);
@@ -352,6 +387,10 @@ int main(void)
     ruuvi_ui_error(false);
     bool normal_mode = false;
     bool configured_fast = true;
+    bool configured_connectable = RUUVI_GATT_ENABLED != 0;
+#if RUUVI_GATT_ENABLED
+    bool link_was_connected = false;
+#endif
 #if defined(CONFIG_NFC_T4T_NRFXLIB) || (RUUVI_GATT_ENABLED && defined(CONFIG_MCUMGR_TRANSPORT_BT))
     bool have_payload = false;
 #endif
@@ -372,7 +411,7 @@ int main(void)
     bool nfc_was_present = false;
 #endif
     int64_t next_heartbeat_ms = k_uptime_get();
-    const int64_t fast_deadline_ms = next_heartbeat_ms + APP_FAST_ADV_TIME_MS;
+    int64_t fast_deadline_ms = next_heartbeat_ms + APP_FAST_ADV_TIME_MS;
 
     while (true) {
 #if defined(CONFIG_NFC_T4T_NRFXLIB)
@@ -433,6 +472,24 @@ int main(void)
             ruuvi_ui_error(true);
             recovery_reported = true;
         }
+#if RUUVI_GATT_ENABLED
+        bool link_connected = atomic_get(&connected) != 0;
+        if (link_connected != link_was_connected) {
+            if (!link_connected && atomic_get(&advertising)) {
+                err = bt_le_ext_adv_stop(advertiser);
+                if (err != 0) {
+                    LOG_WRN("Stopping connected-state beacon failed: %d", err);
+                    k_sleep(K_MSEC(100));
+                    continue;
+                }
+                atomic_clear(&advertising);
+            }
+            k_msgq_purge(&adv_queue);
+            normal_mode = false;
+            fast_deadline_ms = k_uptime_get() + APP_FAST_ADV_TIME_MS;
+            link_was_connected = link_connected;
+        }
+#endif
 #if RUUVI_GATT_ENABLED && defined(CONFIG_MCUMGR_TRANSPORT_BT)
         /* Keep legacy NUS discovery normally; expose SMP for the next-link window. */
         const struct bt_data *wanted_response = atomic_get(&config_next) ? sd_dfu : sd;
@@ -458,7 +515,7 @@ int main(void)
             normal_mode = true;
         }
 #if defined(CONFIG_NFC_T4T_NRFXLIB)
-        if (nfc_field_ended && radio_allowed && have_payload && !atomic_get(&connected)) {
+        if (nfc_field_ended && radio_allowed && have_payload) {
             ruuvi_adv_frame_t resume = {
                 .length = (uint8_t)(2U + latest_payload_len),
                 .ad_count = (uint8_t)adv_count,
@@ -471,29 +528,51 @@ int main(void)
             }
         }
 #endif
-        if (radio_allowed && !atomic_get(&connected) && !atomic_get(&advertising) &&
+#if RUUVI_GATT_ENABLED
+        bool can_start = atomic_get(&connected) || atomic_get(&connection_recycled);
+#else
+        bool can_start = true;
+#endif
+        if (radio_allowed && can_start && !atomic_get(&advertising) &&
             k_msgq_get(&adv_queue, &on_air, K_NO_WAIT) == 0) {
+            bool connectable = RUUVI_GATT_ENABLED && !atomic_get(&connected);
+            const struct bt_le_adv_param *params = on_air.fast ? &fast_adv : &normal_adv;
+#if RUUVI_GATT_ENABLED
+            if (!connectable) {
+                params = on_air.fast ? &fast_broadcast : &normal_broadcast;
+            }
+#endif
             int adv_rc = 0;
-            if (on_air.fast != configured_fast) {
-                adv_rc = bt_le_ext_adv_update_param(advertiser,
-                                on_air.fast ? &fast_adv : &normal_adv);
+            if (on_air.fast != configured_fast || connectable != configured_connectable) {
+                adv_rc = bt_le_ext_adv_update_param(advertiser, params);
                 if (adv_rc == 0) {
                     configured_fast = on_air.fast;
+                    configured_connectable = connectable;
                 }
             }
             if (adv_rc == 0) {
                 ad[1].data = on_air.manufacturer;
                 ad[1].data_len = on_air.length;
                 adv_rc = bt_le_ext_adv_set_data(advertiser, ad, on_air.ad_count,
-                                                 scan_response, scan_rsp_count);
+                                           scan_response, connectable ? scan_rsp_count : 0U);
             }
             if (adv_rc == 0) {
                 const struct bt_le_ext_adv_start_param limits =
                     BT_LE_EXT_ADV_START_PARAM_INIT(0, on_air.repeats);
+#if RUUVI_GATT_ENABLED
+                if (connectable) {
+                    atomic_clear(&connection_recycled);
+                }
+#endif
                 atomic_set(&advertising, 1);
                 adv_rc = bt_le_ext_adv_start(advertiser, &limits);
                 if (adv_rc != 0) {
                     atomic_clear(&advertising);
+#if RUUVI_GATT_ENABLED
+                    if (connectable) {
+                        atomic_set(&connection_recycled, 1);
+                    }
+#endif
                 }
             }
             if (adv_rc != 0) {
@@ -739,7 +818,7 @@ int main(void)
 #endif
             bool heartbeat_ok = false;
 
-            if (radio_allowed && !atomic_get(&connected)) {
+            if (radio_allowed) {
                 ruuvi_adv_frame_t frame = {
                     .length = (uint8_t)(2U + payload_length),
                     .ad_count = (uint8_t)adv_count,
