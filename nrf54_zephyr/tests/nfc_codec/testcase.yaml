@@ -1,0 +1,6 @@
+tests:
+  ruuvi.nfc_codec:
+    tags:
+      - nfc
+    integration_platforms:
+      - qemu_cortex_m3

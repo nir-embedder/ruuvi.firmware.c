@@ -1,0 +1,29 @@
+/* Candidate nRF54L15 TAG cpuapp layout; MCUboot must use this same layout. */
+/delete-node/ &slot1_partition;
+/delete-node/ &storage_partition;
+
+&slot0_partition {
+	reg = <0x10000 0xaa000>;
+};
+
+&cpuapp_rram {
+	partitions {
+		slot1_partition: partition@ba000 {
+			compatible = "zephyr,mapped-partition";
+			label = "image-1";
+			reg = <0xba000 0xaa000>;
+		};
+
+		ruuvi_history_partition: partition@164000 {
+			compatible = "zephyr,mapped-partition";
+			label = "ruuvi-history";
+			reg = <0x164000 0xf000>;
+		};
+
+		storage_partition: partition@173000 {
+			compatible = "zephyr,mapped-partition";
+			label = "storage";
+			reg = <0x173000 0xa000>;
+		};
+	};
+};

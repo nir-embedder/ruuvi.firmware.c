@@ -1,0 +1,23 @@
+/* Test-only RAM-backed flash; not a board or production partition layout. */
+/delete-node/ &storage_partition;
+
+&sim_flash_controller {
+    erase-value = <0xff>;
+};
+
+&flash_sim0 {
+    reg = <0x0 0x14000>;
+    erase-block-size = <4096>;
+    write-block-size = <4>;
+
+    partitions {
+        ruuvi_history_partition: partition@1000 {
+            label = "ruuvi-history-test";
+            reg = <0x1000 0xf000>;
+        };
+        storage_partition: partition@10000 {
+            label = "settings-test";
+            reg = <0x10000 0x4000>;
+        };
+    };
+};

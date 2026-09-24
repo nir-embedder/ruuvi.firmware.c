@@ -1,0 +1,16 @@
+/* Candidate Nordic nRF54L15 TAG devicetree, not a RuuviTag pin map.
+ * Aliases refer only to nodes already defined by Zephyr's Nordic TAG board.
+ */
+/ {
+    aliases {
+        env0 = &bme688;
+        accel0 = &adxl367;
+        led0 = &led1_green;
+        led1 = &led1_red;
+        watchdog0 = &wdt31;
+    };
+};
+
+&wdt31 {
+    status = "okay";
+};

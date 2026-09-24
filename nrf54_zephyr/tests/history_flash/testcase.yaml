@@ -1,0 +1,8 @@
+tests:
+  ruuvi.history_flash.simulator:
+    tags:
+      - storage
+    integration_platforms:
+      - mps2/an385
+    extra_dtc_overlay_files:
+      - mps2_history.overlay

@@ -1,0 +1,6 @@
+tests:
+  ruuvi.aes_vector:
+    tags:
+      - crypto
+    integration_platforms:
+      - qemu_cortex_m3
