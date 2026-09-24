@@ -124,10 +124,7 @@ jobs:
           base-path: ncs
           app-path: nrf
           toolchains: arm-zephyr-eabi
-          west-update-flags: >-
-            -o=--depth=1 -n zephyr mcuboot qcbor t_cose mbedtls
-            oberon-psa-crypto nrfxlib trusted-firmware-m psa-arch-tests
-            hal_nordic cmsis cmsis_6 tf-psa-crypto zcbor segger nanopb
+          west-update-flags: -o=--depth=1 -n
 
       - name: Install NCS build requirements
         working-directory: ncs
