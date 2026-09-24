@@ -245,4 +245,16 @@ jobs:
           export GEM_PATH="$GEM_HOME"
           export PATH="$GEM_HOME/bin:$PATH"
           gem install ceedling -v 1.0.1 --install-dir "$GEM_HOME" --no-document
-          ceedling test:all
+          set -o pipefail
+          ceedling test:all | tee "$RUNNER_TEMP/sdk5-ceedling.log"
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          output = (Path(os.environ["RUNNER_TEMP"]) / "sdk5-ceedling.log").read_text()
+          for label, expected in {"TESTED": 139, "PASSED": 139, "FAILED": 0, "IGNORED": 0}.items():
+              matches = re.findall(rf"(?m)^{label}:\s*(\d+)\s*$", output)
+              if len(matches) != 1 or int(matches[0]) != expected:
+                  raise SystemExit(f"SDK5 baseline {label}: expected {expected}, saw {matches}")
+          PY
