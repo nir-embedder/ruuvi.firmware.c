@@ -43,6 +43,22 @@ LOG_MODULE_REGISTER(ruuvi_beacon, LOG_LEVEL_INF);
 #define APP_WDT_TIMEOUT_MS RUUVI_WDT_TIMEOUT_MS
 #define APP_GATT_TURBO_DELAY_MS 30000
 #define APP_CONFIG_WINDOW_MS 60000U
+#define APP_FAST_ADV_REPEATS MAX(APP_HEARTBEAT_MS / 100U, 1U)
+
+BUILD_ASSERT(RUUVI_NUM_REPEATS > 0U && RUUVI_NUM_REPEATS < 255U &&
+             APP_FAST_ADV_REPEATS < 255U, "Advertising event count must fit the controller");
+
+typedef struct {
+    uint8_t manufacturer[2U + RUUVI_FORMAT_MAX_LENGTH];
+    uint8_t length;
+    uint8_t ad_count;
+    uint8_t repeats;
+    bool fast;
+} ruuvi_adv_frame_t;
+
+/* Match the SDK5 queue's three pending frames; an active set is separate. */
+K_MSGQ_DEFINE(adv_queue, sizeof(ruuvi_adv_frame_t), 3, 4);
+K_SEM_DEFINE(adv_sent, 0, 1);
 
 #if DT_NODE_EXISTS(DT_NODELABEL(ruuvi_history_partition)) && RUUVI_HISTORY_ENABLED
 static const struct bt_le_conn_param gatt_turbo = BT_LE_CONN_PARAM_INIT(12, 24, 0, 600);
@@ -80,6 +96,18 @@ BUILD_ASSERT(DT_REG_ADDR(DT_NODELABEL(storage_partition)) >=
 static atomic_t connected;
 static atomic_t advertising;
 
+static void on_adv_sent(struct bt_le_ext_adv *adv, struct bt_le_ext_adv_sent_info *info)
+{
+    ARG_UNUSED(adv);
+    ARG_UNUSED(info);
+    atomic_clear(&advertising);
+    k_sem_give(&adv_sent);
+}
+
+static const struct bt_le_ext_adv_cb adv_callbacks = {
+    .sent = on_adv_sent,
+};
+
 #if RUUVI_GATT_ENABLED
 static atomic_t config_next;
 static atomic_t config_current;
@@ -109,6 +137,7 @@ static void on_connected(struct bt_conn *conn, uint8_t status)
     ARG_UNUSED(conn);
     atomic_clear(&advertising); /* Connectable legacy advertising stops on connection. */
     if (status == 0) {
+        k_msgq_purge(&adv_queue);
         bool in_window = atomic_get(&config_next) != 0 &&
             (uint32_t)(k_uptime_get_32() -
                        (uint32_t)atomic_get(&config_window_start_ms)) < APP_CONFIG_WINDOW_MS;
@@ -128,6 +157,7 @@ static void on_disconnected(struct bt_conn *conn, uint8_t reason)
     atomic_clear(&config_current);
     atomic_clear(&connected);
     atomic_clear(&advertising);
+    k_msgq_purge(&adv_queue);
 }
 
 BT_CONN_CB_DEFINE(ruuvi_connections) = {
@@ -148,12 +178,14 @@ static int send_log_reply(void *context, const uint8_t *data, size_t length)
 
 int main(void)
 {
+    const uint32_t adv_options = BT_LE_ADV_OPT_USE_IDENTITY |
+        (RUUVI_GATT_ENABLED ? (BT_LE_ADV_OPT_CONN | BT_LE_ADV_OPT_SCANNABLE) : 0U);
     const struct bt_le_adv_param fast_adv =
-        BT_LE_ADV_PARAM_INIT(BT_LE_ADV_OPT_USE_IDENTITY | (RUUVI_GATT_ENABLED ? BT_LE_ADV_OPT_CONN : 0U),
-                             APP_FAST_ADV_UNITS, APP_FAST_ADV_UNITS, NULL);
+        BT_LE_ADV_PARAM_INIT(adv_options, APP_FAST_ADV_UNITS, APP_FAST_ADV_UNITS, NULL);
     const struct bt_le_adv_param normal_adv =
-        BT_LE_ADV_PARAM_INIT(BT_LE_ADV_OPT_USE_IDENTITY | (RUUVI_GATT_ENABLED ? BT_LE_ADV_OPT_CONN : 0U),
-                             APP_NORMAL_ADV_UNITS, APP_NORMAL_ADV_UNITS, NULL);
+        BT_LE_ADV_PARAM_INIT(adv_options, APP_NORMAL_ADV_UNITS, APP_NORMAL_ADV_UNITS, NULL);
+    struct bt_le_ext_adv *advertiser = NULL;
+    ruuvi_adv_frame_t on_air = {0};
     uint8_t manufacturer[2 + RUUVI_FORMAT_MAX_LENGTH] = { 0x99, 0x04 };
     struct bt_data ad[] = {
         BT_DATA_BYTES(BT_DATA_FLAGS, BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR),
@@ -312,9 +344,20 @@ int main(void)
         return err;
     }
 #endif
+    err = bt_le_ext_adv_create(&fast_adv, &adv_callbacks, &advertiser);
+    if (err != 0) {
+        LOG_ERR("Creating BLE advertising set failed: %d", err);
+        return err;
+    }
     ruuvi_ui_error(false);
     bool normal_mode = false;
+    bool configured_fast = true;
+#if defined(CONFIG_NFC_T4T_NRFXLIB) || (RUUVI_GATT_ENABLED && defined(CONFIG_MCUMGR_TRANSPORT_BT))
     bool have_payload = false;
+#endif
+#if defined(CONFIG_NFC_T4T_NRFXLIB)
+    size_t latest_payload_len = 0;
+#endif
     bool no_sensors_reported = false;
 #if RUUVI_GATT_ENABLED
     ruuvi_log_service_t log_service = {0};
@@ -336,13 +379,14 @@ int main(void)
         bool nfc_present = ruuvi_nfc_field_active();
         if (nfc_present) {
             if (atomic_get(&advertising)) {
-                err = bt_le_adv_stop();
+                err = bt_le_ext_adv_stop(advertiser);
                 if (err == 0) {
                     atomic_clear(&advertising);
                 } else {
                     LOG_WRN("Stopping BLE for NFC field failed: %d", err);
                 }
             }
+            k_msgq_purge(&adv_queue);
 #if RUUVI_GATT_ENABLED
             if (!nfc_was_present) {
                 bt_conn_foreach(BT_CONN_TYPE_LE, disconnect_for_config, NULL);
@@ -395,7 +439,8 @@ int main(void)
         if (scan_response != wanted_response) {
             scan_response = wanted_response;
             if (have_payload && atomic_get(&advertising) && !atomic_get(&connected)) {
-                int adv_rc = bt_le_adv_update_data(ad, adv_count, scan_response, scan_rsp_count);
+                int adv_rc = bt_le_ext_adv_set_data(advertiser, ad, on_air.ad_count,
+                                                      scan_response, scan_rsp_count);
                 if (adv_rc != 0) {
                     LOG_WRN("Updating DFU scan response failed: %d", adv_rc);
                 }
@@ -409,23 +454,50 @@ int main(void)
 #endif
         int64_t now = k_uptime_get();
         if (!normal_mode && now >= fast_deadline_ms) {
-            if (atomic_get(&advertising)) {
-                err = bt_le_adv_stop();
-                if (err) {
-                    LOG_ERR("Stopping fast advertising failed: %d", err);
-                    k_sleep(K_MSEC(100));
-                    continue;
-                }
-                atomic_clear(&advertising);
-            }
+            /* Existing fast frames retain their settings; only new samples switch. */
             normal_mode = true;
-            if (radio_allowed && !atomic_get(&connected) && have_payload) {
-                err = bt_le_adv_start(&normal_adv, ad, adv_count, scan_response, scan_rsp_count);
-                if (err) {
-                    LOG_ERR("Starting normal advertising failed: %d", err);
-                } else {
-                    atomic_set(&advertising, 1);
+        }
+#if defined(CONFIG_NFC_T4T_NRFXLIB)
+        if (nfc_field_ended && radio_allowed && have_payload && !atomic_get(&connected)) {
+            ruuvi_adv_frame_t resume = {
+                .length = (uint8_t)(2U + latest_payload_len),
+                .ad_count = (uint8_t)adv_count,
+                .repeats = normal_mode ? RUUVI_NUM_REPEATS : APP_FAST_ADV_REPEATS,
+                .fast = !normal_mode,
+            };
+            memcpy(resume.manufacturer, manufacturer, sizeof(resume.manufacturer));
+            if (k_msgq_put(&adv_queue, &resume, K_NO_WAIT) != 0) {
+                LOG_WRN("BLE advertisement queue full after NFC field");
+            }
+        }
+#endif
+        if (radio_allowed && !atomic_get(&connected) && !atomic_get(&advertising) &&
+            k_msgq_get(&adv_queue, &on_air, K_NO_WAIT) == 0) {
+            int adv_rc = 0;
+            if (on_air.fast != configured_fast) {
+                adv_rc = bt_le_ext_adv_update_param(advertiser,
+                                on_air.fast ? &fast_adv : &normal_adv);
+                if (adv_rc == 0) {
+                    configured_fast = on_air.fast;
                 }
+            }
+            if (adv_rc == 0) {
+                ad[1].data = on_air.manufacturer;
+                ad[1].data_len = on_air.length;
+                adv_rc = bt_le_ext_adv_set_data(advertiser, ad, on_air.ad_count,
+                                                 scan_response, scan_rsp_count);
+            }
+            if (adv_rc == 0) {
+                const struct bt_le_ext_adv_start_param limits =
+                    BT_LE_EXT_ADV_START_PARAM_INIT(0, on_air.repeats);
+                atomic_set(&advertising, 1);
+                adv_rc = bt_le_ext_adv_start(advertiser, &limits);
+                if (adv_rc != 0) {
+                    atomic_clear(&advertising);
+                }
+            }
+            if (adv_rc != 0) {
+                LOG_ERR("Starting queued advertisement failed: %d", adv_rc);
             }
         }
 #if defined(CONFIG_NFC_T4T_NRFXLIB)
@@ -544,26 +616,30 @@ int main(void)
             next_event_ms = fast_deadline_ms;
         }
         if (now < next_event_ms) {
-            k_timeout_t wait = K_MSEC(next_event_ms - now);
-#if defined(CONFIG_NFC_T4T_NRFXLIB)
-            struct k_poll_event events[RUUVI_GATT_ENABLED ? 2 : 1];
+            struct k_poll_event events[1 + RUUVI_GATT_ENABLED +
+                                       IS_ENABLED(CONFIG_NFC_T4T_NRFXLIB)];
             size_t event_count = 0;
+            k_poll_event_init(&events[event_count++], K_POLL_TYPE_SEM_AVAILABLE,
+                              K_POLL_MODE_NOTIFY_ONLY, &adv_sent);
 #if RUUVI_GATT_ENABLED
             k_poll_event_init(&events[event_count++], K_POLL_TYPE_MSGQ_DATA_AVAILABLE,
                               K_POLL_MODE_NOTIFY_ONLY, ruuvi_gatt_request_queue());
 #endif
+#if defined(CONFIG_NFC_T4T_NRFXLIB)
             k_poll_event_init(&events[event_count++], K_POLL_TYPE_SEM_AVAILABLE,
                               K_POLL_MODE_NOTIFY_ONLY, ruuvi_nfc_event_sem());
-            int poll_rc = k_poll(events, event_count, wait);
+#endif
+            int poll_rc = k_poll(events, event_count, K_MSEC(next_event_ms - now));
             if (poll_rc != 0 && poll_rc != -EAGAIN) {
-                LOG_WRN("NFC/GATT event wait failed: %d", poll_rc);
+                LOG_WRN("BLE/NFC event wait failed: %d", poll_rc);
             }
+            (void)k_sem_take(&adv_sent, K_NO_WAIT);
+#if defined(CONFIG_NFC_T4T_NRFXLIB)
             (void)k_sem_take(ruuvi_nfc_event_sem(), K_NO_WAIT);
-            wait = K_NO_WAIT;
 #endif
 #if RUUVI_GATT_ENABLED
             ruuvi_gatt_request_t queued = {0};
-            int queue_rc = ruuvi_gatt_request_take(&queued, wait);
+            int queue_rc = ruuvi_gatt_request_take(&queued, K_NO_WAIT);
             if (queue_rc == 0) {
                 struct bt_conn_info info;
                 if (!radio_allowed || !atomic_get(&connected) ||
@@ -597,10 +673,6 @@ int main(void)
                     }
                 }
             }
-#else
-#if !defined(CONFIG_NFC_T4T_NRFXLIB)
-            k_sleep(wait);
-#endif
 #endif
             continue;
         }
@@ -659,22 +731,26 @@ int main(void)
         if (err) {
             LOG_ERR("Data format %u encoding failed: %d", (unsigned int)format, err);
         } else {
-            ad[1].data_len = 2U + payload_length;
+#if defined(CONFIG_NFC_T4T_NRFXLIB) || (RUUVI_GATT_ENABLED && defined(CONFIG_MCUMGR_TRANSPORT_BT))
             have_payload = true;
+#endif
+#if defined(CONFIG_NFC_T4T_NRFXLIB)
+            latest_payload_len = payload_length;
+#endif
             bool heartbeat_ok = false;
 
             if (radio_allowed && !atomic_get(&connected)) {
-                bool was_advertising = atomic_get(&advertising) != 0;
-
-                err = was_advertising
-                    ? bt_le_adv_update_data(ad, adv_count, scan_response, scan_rsp_count)
-                    : bt_le_adv_start(normal_mode ? &normal_adv : &fast_adv,
-                                      ad, adv_count, scan_response, scan_rsp_count);
-                if (err) {
-                    LOG_ERR("Bluetooth advertising %s failed: %d",
-                            was_advertising ? "update" : "start", err);
+                ruuvi_adv_frame_t frame = {
+                    .length = (uint8_t)(2U + payload_length),
+                    .ad_count = (uint8_t)adv_count,
+                    .repeats = normal_mode ? RUUVI_NUM_REPEATS : APP_FAST_ADV_REPEATS,
+                    .fast = !normal_mode,
+                };
+                memcpy(frame.manufacturer, manufacturer, sizeof(frame.manufacturer));
+                err = k_msgq_put(&adv_queue, &frame, K_NO_WAIT);
+                if (err != 0) {
+                    LOG_ERR("BLE advertisement queue full: %d", err);
                 } else {
-                    atomic_set(&advertising, 1);
                     heartbeat_ok = true;
                 }
             }
