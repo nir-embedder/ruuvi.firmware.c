@@ -11,6 +11,8 @@
 #include "history.h"
 #include "history_flash.h"
 #include "history_settings.h"
+#include "log_service.h"
+#include "ruuvi_endpoints.h"
 
 ZTEST(ruuvi_history_flash, test_mount_only)
 {
@@ -21,6 +23,27 @@ ZTEST(ruuvi_history_flash, test_mount_only)
 #ifdef CONFIG_FLASH_SIMULATOR
 static ruuvi_history_record_t original;
 static ruuvi_history_record_t recovered;
+
+typedef struct {
+    uint8_t frames[4][RUUVI_LOG_MESSAGE_LENGTH];
+    size_t count;
+    bool busy_once;
+} log_capture_t;
+
+static int capture_log_frame(void *context, const uint8_t *data, size_t length)
+{
+    log_capture_t *capture = context;
+
+    if (length != RUUVI_LOG_MESSAGE_LENGTH || capture->count >= ARRAY_SIZE(capture->frames)) {
+        return -EINVAL;
+    }
+    if (capture->busy_once) {
+        capture->busy_once = false;
+        return -EAGAIN;
+    }
+    memcpy(capture->frames[capture->count++], data, length);
+    return 0;
+}
 
 ZTEST(ruuvi_history_flash, test_full_ring_and_torn_overwrite)
 {
@@ -136,6 +159,44 @@ ZTEST(ruuvi_history_flash, test_manager_recovers_committed_samples)
     zassert_equal(ruuvi_history_latest_timestamp(&latest), 0);
     zassert_equal(latest, second.timestamp_s);
     zassert_equal(ruuvi_history_read(0, 2, &result), -ENOENT);
+    zassert_equal(ruuvi_history_clear(), 0);
+}
+
+ZTEST(ruuvi_history_flash, test_flash_backed_log_stream)
+{
+    const ruuvi_history_element_t sample = {
+        .timestamp_s = 240, .temperature_c = 23.45f,
+        .humidity_rh = 56.78f, .pressure_pa = 101325.0f,
+    };
+    const uint8_t request[RUUVI_LOG_MESSAGE_LENGTH] = {
+        RE_STANDARD_DESTINATION_ENVIRONMENTAL, 0xA5, RE_STANDARD_LOG_VALUE_READ,
+        0x00, 0x00, 0x03, 0xE8, 0x00, 0x00, 0x03, 0x84,
+    };
+    const uint8_t expected[][RUUVI_LOG_MESSAGE_LENGTH] = {
+        {0xA5, 0x31, 0x10, 0x00, 0x00, 0x03, 0xAC, 0x00, 0x00, 0x16, 0x2E},
+        {0xA5, 0x32, 0x10, 0x00, 0x00, 0x03, 0xAC, 0x00, 0x01, 0x8B, 0xCD},
+        {0xA5, 0x30, 0x10, 0x00, 0x00, 0x03, 0xAC, 0x00, 0x00, 0x09, 0x29},
+        {0xA5, 0x3A, 0x10, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF},
+    };
+    ruuvi_log_service_t service = {0};
+    log_capture_t capture = {.busy_once = true};
+
+    zassert_equal(ruuvi_history_init(), 0);
+    zassert_equal(ruuvi_history_clear(), 0);
+    zassert_equal(ruuvi_history_process(&sample), 1);
+    zassert_equal(ruuvi_history_flush(), 0);
+    zassert_equal(ruuvi_history_init(), 0);
+    zassert_equal(ruuvi_log_service_start(&service, request, sizeof(request), 300, 100), 0);
+    zassert_equal(ruuvi_log_service_pump(&service, 100, capture_log_frame, &capture), 0);
+    zassert_true(ruuvi_log_service_active(&service));
+    for (size_t i = 0; i < ARRAY_SIZE(expected); ++i) {
+        zassert_equal(ruuvi_log_service_pump(&service, 101 + i, capture_log_frame, &capture), 1);
+    }
+    zassert_false(ruuvi_log_service_active(&service));
+    zassert_equal(capture.count, ARRAY_SIZE(expected));
+    for (size_t i = 0; i < ARRAY_SIZE(expected); ++i) {
+        zassert_mem_equal(capture.frames[i], expected[i], RUUVI_LOG_MESSAGE_LENGTH);
+    }
     zassert_equal(ruuvi_history_clear(), 0);
 }
 

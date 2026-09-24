@@ -125,7 +125,7 @@ jobs:
           expected = {
               "twister-cm3": {"ruuvi.aes_vector": 1, "ruuvi.nfc_codec": 3},
               "twister-mps2": {
-                  "ruuvi.history_flash.simulator": 5,
+                  "ruuvi.history_flash.simulator": 6,
                   "ruuvi.ui.gpio_emulator": 1,
                   "ruuvi.sensors.motion_trigger": 4,
                   "ruuvi.gatt.rx_queue": 3,
