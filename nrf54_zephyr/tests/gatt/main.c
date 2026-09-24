@@ -6,6 +6,7 @@
 #include <zephyr/bluetooth/conn.h>
 #include <zephyr/bluetooth/gatt.h>
 #include <zephyr/kernel.h>
+#include <zephyr/sys/iterable_sections.h>
 #include <zephyr/ztest.h>
 
 #include "gatt.h"
@@ -41,7 +42,7 @@ void __wrap_bt_conn_unref(struct bt_conn *conn)
 static bool link_connected = true;
 static int notify_error;
 static uint16_t expected_notification_length;
-static enum { COMPLETE_REPLY, HOLD_REPLY, SEND_OLD_REPLY } notify_mode;
+static enum { COMPLETE_REPLY, HOLD_REPLY, SEND_OLD_REPLY, DISCONNECT_REPLY } notify_mode;
 static bt_gatt_complete_func_t old_completion;
 static void *old_cookie;
 static struct bt_conn *old_conn;
@@ -71,6 +72,14 @@ int __wrap_bt_gatt_notify_cb(struct bt_conn *conn, struct bt_gatt_notify_params 
         } else if (notify_mode == SEND_OLD_REPLY) {
             zassert_not_null(old_completion);
             old_completion(old_conn, old_cookie);
+        } else if (notify_mode == DISCONNECT_REPLY) {
+            size_t count = 0;
+            STRUCT_SECTION_COUNT(bt_conn_cb, &count);
+            zassert_equal(count, 1U); /* Never call an unrelated callback with a fake conn. */
+            STRUCT_SECTION_FOREACH(bt_conn_cb, cb) {
+                zassert_not_null(cb->disconnected);
+                cb->disconnected(conn, 0);
+            }
         } else {
             params->func(conn, params->user_data);
         }
@@ -178,6 +187,10 @@ ZTEST(ruuvi_gatt, test_password_completion_and_timeout_tickets)
     zassert_not_null(old_completion);
     notify_mode = SEND_OLD_REPLY;
     zassert_equal(ruuvi_gatt_command_send(peer, password_reply), -ETIMEDOUT);
+    notify_mode = COMPLETE_REPLY;
+    zassert_equal(ruuvi_gatt_command_send(peer, password_reply), 0);
+    notify_mode = DISCONNECT_REPLY;
+    zassert_equal(ruuvi_gatt_command_send(peer, password_reply), -ENOTCONN);
     notify_mode = COMPLETE_REPLY;
     zassert_equal(ruuvi_gatt_command_send(peer, password_reply), 0);
 
