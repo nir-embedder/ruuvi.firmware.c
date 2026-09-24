@@ -152,6 +152,9 @@ static void on_connected(struct bt_conn *conn, uint8_t status)
     ARG_UNUSED(conn);
     if (status == 0) {
         k_msgq_purge(&adv_queue);
+        if (ruuvi_ui_config_claim()) {
+            config_window_open();
+        }
         bool in_window = atomic_get(&config_next) != 0 &&
             (uint32_t)(k_uptime_get_32() -
                        (uint32_t)atomic_get(&config_window_start_ms)) < APP_CONFIG_WINDOW_MS;
@@ -248,9 +251,6 @@ int main(void)
 #if RUUVI_GATT_ENABLED || defined(CONFIG_NFC_T4T_NRFXLIB)
     uint8_t device_id[8] = {0};
     bool have_device_id = false;
-#endif
-#if RUUVI_GATT_ENABLED
-    bool config_pending_seen = false;
 #endif
     uint16_t sequence[6] = {0}; /* Separate legacy counters for each format. */
     ruuvi_format_t format = RUUVI_FORMAT_INVALID;
@@ -454,12 +454,10 @@ int main(void)
 #endif
 #endif
 #if RUUVI_GATT_ENABLED
-        bool config_pending = ruuvi_ui_config_pending();
-        if (config_pending && !config_pending_seen) {
+        if (ruuvi_ui_config_claim()) {
             config_window_open();
             bt_conn_foreach(BT_CONN_TYPE_LE, disconnect_for_config, NULL);
         }
-        config_pending_seen = config_pending;
         if (atomic_get(&config_next) &&
             (uint32_t)(k_uptime_get_32() -
                        (uint32_t)atomic_get(&config_window_start_ms)) >= APP_CONFIG_WINDOW_MS) {

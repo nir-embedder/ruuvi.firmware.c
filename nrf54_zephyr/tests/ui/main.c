@@ -41,6 +41,9 @@ ZTEST(ruuvi_ui, test_feedback_and_button_windows)
     k_sleep(K_MSEC(100));
     check_leds(1, 0, 0);
     zassert_true(ruuvi_ui_config_pending());
+    zassert_true(ruuvi_ui_config_claim());
+    zassert_false(ruuvi_ui_config_claim()); /* Callback and main cannot both consume it. */
+    zassert_false(ruuvi_ui_config_pending());
     zassert_false(ruuvi_ui_recovery_requested());
 
     ruuvi_ui_configuration(true);
@@ -50,6 +53,13 @@ ZTEST(ruuvi_ui, test_feedback_and_button_windows)
     ruuvi_ui_error(false);
     ruuvi_ui_activity(false);
     check_leds(0, 0, 0);
+
+    zassert_equal(gpio_emul_input_set(button.port, button.pin, 1), 0);
+    k_sleep(K_MSEC(100));
+    zassert_equal(gpio_emul_input_set(button.port, button.pin, 0), 0);
+    k_sleep(K_MSEC(100));
+    zassert_true(ruuvi_ui_config_claim()); /* Another release opens a new window. */
+    zassert_false(ruuvi_ui_config_claim());
 
     zassert_equal(gpio_emul_input_set(button.port, button.pin, 1), 0);
     k_sleep(K_MSEC(5200));

@@ -213,6 +213,11 @@ bool ruuvi_ui_config_pending(void)
     return atomic_get(&config_pending) != 0;
 }
 
+bool ruuvi_ui_config_claim(void)
+{
+    return atomic_clear(&config_pending) != 0;
+}
+
 bool ruuvi_ui_recovery_requested(void)
 {
     return atomic_get(&recovery_requested) != 0;
