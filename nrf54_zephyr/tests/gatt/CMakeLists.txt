@@ -12,4 +12,5 @@ else()
     target_compile_definitions(app PRIVATE RUUVI_HISTORY_ENABLED=0)
 endif()
 zephyr_ld_options(-Wl,--wrap=bt_conn_ref -Wl,--wrap=bt_conn_unref
+                  -Wl,--wrap=bt_conn_get_info -Wl,--wrap=bt_gatt_notify_cb
                   -Wl,--wrap=bt_gatt_is_subscribed)
