@@ -77,8 +77,8 @@ jobs:
                   "ruuvi.history_flash.simulator": 4,
                   "ruuvi.ui.gpio_emulator": 1,
                   "ruuvi.sensors.motion_trigger": 4,
-                  "ruuvi.gatt.rx_queue": 2,
-                  "ruuvi.gatt.rx_queue_history": 2,
+                  "ruuvi.gatt.rx_queue": 3,
+                  "ruuvi.gatt.rx_queue_history": 3,
               },
           }
           for output, suites in expected.items():

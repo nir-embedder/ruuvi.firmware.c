@@ -3,8 +3,10 @@
 #include <string.h>
 
 #include <zephyr/bluetooth/att.h>
+#include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/conn.h>
 #include <zephyr/bluetooth/gatt.h>
+#include <zephyr/bluetooth/uuid.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/iterable_sections.h>
 #include <zephyr/ztest.h>
@@ -233,6 +235,77 @@ ZTEST(ruuvi_gatt, test_password_completion_and_timeout_tickets)
     zassert_equal(ruuvi_gatt_notify(broadcast, sizeof(broadcast)), 0);
     notify_error = -ENOTCONN;
     zassert_equal(ruuvi_gatt_notify(broadcast, sizeof(broadcast)), 0);
+}
+
+ZTEST(ruuvi_gatt, test_legacy_ad_serialization_order)
+{
+    uint8_t manufacturer[26] = {0x99, 0x04, 0x05};
+    struct bt_data no_uuid[] = {
+        BT_DATA_BYTES(BT_DATA_FLAGS, BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR),
+        BT_DATA(BT_DATA_MANUFACTURER_DATA, manufacturer, sizeof(manufacturer)),
+    };
+    struct bt_data with_uuid[] = {
+        BT_DATA_BYTES(BT_DATA_FLAGS, BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR),
+        BT_DATA_BYTES(BT_DATA_UUID16_SOME, 0x98, 0xFC),
+        BT_DATA(BT_DATA_MANUFACTURER_DATA, manufacturer, 22U),
+    };
+    uint8_t primary[31];
+    size_t length = 0;
+
+    zassert_equal(bt_data_get_len(no_uuid, ARRAY_SIZE(no_uuid)), sizeof(primary));
+    for (size_t i = 0; i < ARRAY_SIZE(no_uuid); ++i) {
+        length += bt_data_serialize(&no_uuid[i], primary + length);
+    }
+    const uint8_t df5_header[] = {0x02, 0x01, 0x06, 0x1B, 0xFF, 0x99, 0x04, 0x05};
+    zassert_equal(length, sizeof(primary));
+    zassert_mem_equal(primary, df5_header, sizeof(df5_header));
+    zassert_mem_equal(primary + 5U, manufacturer, sizeof(manufacturer));
+
+    manufacturer[2] = 0x07;
+    length = 0;
+    zassert_equal(bt_data_get_len(with_uuid, ARRAY_SIZE(with_uuid)), sizeof(primary));
+    for (size_t i = 0; i < ARRAY_SIZE(with_uuid); ++i) {
+        length += bt_data_serialize(&with_uuid[i], primary + length);
+    }
+    const uint8_t df7_header[] = {
+        0x02, 0x01, 0x06, 0x03, 0x02, 0x98, 0xFC, 0x17, 0xFF, 0x99, 0x04, 0x07,
+    };
+    zassert_equal(length, sizeof(primary));
+    zassert_mem_equal(primary, df7_header, sizeof(df7_header));
+    zassert_mem_equal(primary + 9U, manufacturer, 22U);
+
+    manufacturer[2] = 0xC5;
+    with_uuid[2].data_len = 20U;
+    length = 0;
+    zassert_equal(bt_data_get_len(with_uuid, ARRAY_SIZE(with_uuid)), 29U);
+    for (size_t i = 0; i < ARRAY_SIZE(with_uuid); ++i) {
+        length += bt_data_serialize(&with_uuid[i], primary + length);
+    }
+    zassert_equal(length, 29U);
+    zassert_equal(primary[7], 0x15);
+    zassert_mem_equal(primary + 9U, manufacturer, 20U);
+
+    const uint8_t nus_uuid[] = {
+        BT_UUID_128_ENCODE(0x6e400001, 0xb5a3, 0xf393, 0xe0a9, 0xe50e24dcca9e),
+    };
+    const char device_name[] = "Ruuvi 884F";
+    const struct bt_data scan_data[] = {
+        BT_DATA(BT_DATA_UUID128_ALL, nus_uuid, sizeof(nus_uuid)),
+        BT_DATA(BT_DATA_NAME_COMPLETE, device_name, sizeof(device_name) - 1U),
+    };
+    uint8_t scan[30];
+    length = 0;
+    zassert_equal(bt_data_get_len(scan_data, ARRAY_SIZE(scan_data)), sizeof(scan));
+    for (size_t i = 0; i < ARRAY_SIZE(scan_data); ++i) {
+        length += bt_data_serialize(&scan_data[i], scan + length);
+    }
+    const uint8_t expected_scan[] = {
+        0x11, 0x07, 0x9E, 0xCA, 0xDC, 0x24, 0x0E, 0xE5, 0xA9, 0xE0,
+        0x93, 0xF3, 0xA3, 0xB5, 0x01, 0x00, 0x40, 0x6E,
+        0x0B, 0x09, 'R', 'u', 'u', 'v', 'i', ' ', '8', '8', '4', 'F',
+    };
+    zassert_equal(length, sizeof(scan));
+    zassert_mem_equal(scan, expected_scan, sizeof(expected_scan));
 }
 
 ZTEST_SUITE(ruuvi_gatt, NULL, NULL, NULL, NULL, NULL);

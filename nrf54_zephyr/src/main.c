@@ -224,21 +224,26 @@ int main(void)
     struct bt_data ad[] = {
         BT_DATA_BYTES(BT_DATA_FLAGS, BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR),
         BT_DATA(BT_DATA_MANUFACTURER_DATA, manufacturer, sizeof(manufacturer)),
+    };
+    /* SDK15 ble_advdata_encode() emits optional UUIDs before manufacturer data. */
+    struct bt_data ad_uuid[] = {
+        BT_DATA_BYTES(BT_DATA_FLAGS, BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR),
         BT_DATA_BYTES(BT_DATA_UUID16_SOME, 0x98, 0xFC),
+        BT_DATA(BT_DATA_MANUFACTURER_DATA, manufacturer, sizeof(manufacturer)),
     };
     char device_name[sizeof("Ruuvi FFFF")] = "Ruuvi 0000";
     const struct bt_data sd[] = {
-        BT_DATA(BT_DATA_NAME_COMPLETE, device_name, sizeof(device_name) - 1U),
         BT_DATA_BYTES(BT_DATA_UUID128_ALL,
                       BT_UUID_128_ENCODE(0x6e400001, 0xb5a3, 0xf393,
                                          0xe0a9, 0xe50e24dcca9e)),
+        BT_DATA(BT_DATA_NAME_COMPLETE, device_name, sizeof(device_name) - 1U),
     };
 #if RUUVI_GATT_ENABLED && defined(CONFIG_MCUMGR_TRANSPORT_BT)
     const struct bt_data sd_dfu[] = {
-        BT_DATA(BT_DATA_NAME_COMPLETE, device_name, sizeof(device_name) - 1U),
         BT_DATA_BYTES(BT_DATA_UUID128_ALL,
                       BT_UUID_128_ENCODE(0x8d53dc1d, 0x1db7, 0x4cd3,
                                          0x868b, 0x8a527460aa84)),
+        BT_DATA(BT_DATA_NAME_COMPLETE, device_name, sizeof(device_name) - 1U),
     };
 #endif
     const struct bt_data *scan_response = sd;
@@ -503,8 +508,10 @@ int main(void)
         if (scan_response != wanted_response) {
             scan_response = wanted_response;
             if (have_payload && atomic_get(&advertising) && !atomic_get(&connected)) {
-                int adv_rc = bt_le_ext_adv_set_data(advertiser, ad, on_air.ad_count,
-                                                      scan_response, scan_rsp_count);
+                const struct bt_data *active_ad =
+                    on_air.ad_count == ARRAY_SIZE(ad_uuid) ? ad_uuid : ad;
+                int adv_rc = bt_le_ext_adv_set_data(advertiser, active_ad, on_air.ad_count,
+                                                       scan_response, scan_rsp_count);
                 if (adv_rc != 0) {
                     LOG_WRN("Updating DFU scan response failed: %d", adv_rc);
                 }
@@ -560,7 +567,11 @@ int main(void)
             if (adv_rc == 0) {
                 ad[1].data = on_air.manufacturer;
                 ad[1].data_len = on_air.length;
-                adv_rc = bt_le_ext_adv_set_data(advertiser, ad, on_air.ad_count,
+                ad_uuid[2].data = on_air.manufacturer;
+                ad_uuid[2].data_len = on_air.length;
+                const struct bt_data *active_ad =
+                    on_air.ad_count == ARRAY_SIZE(ad_uuid) ? ad_uuid : ad;
+                adv_rc = bt_le_ext_adv_set_data(advertiser, active_ad, on_air.ad_count,
                                            scan_response, connectable ? scan_rsp_count : 0U);
             }
             if (adv_rc == 0) {
@@ -776,7 +787,7 @@ int main(void)
             return -1;
         }
         adv_count = (format == RUUVI_FORMAT_7 || format == RUUVI_FORMAT_8 ||
-                     format == RUUVI_FORMAT_C5) ? ARRAY_SIZE(ad) : 2U;
+                     format == RUUVI_FORMAT_C5) ? ARRAY_SIZE(ad_uuid) : ARRAY_SIZE(ad);
         size_t slot = 0;
         while (format != (ruuvi_format_t)(1U << slot)) {
             ++slot;
@@ -818,8 +829,8 @@ int main(void)
         } else {
             /* Legacy primary PDUs have 2 bytes of AD header per element. */
             size_t primary_bytes = 2U + ad[0].data_len + 2U + 2U + payload_length;
-            if (adv_count == ARRAY_SIZE(ad)) {
-                primary_bytes += 2U + ad[2].data_len;
+            if (adv_count == ARRAY_SIZE(ad_uuid)) {
+                primary_bytes += 2U + ad_uuid[1].data_len;
             }
             bool primary_fits = primary_bytes <= BT_GAP_ADV_MAX_ADV_DATA_LEN;
             if (!primary_fits) {
