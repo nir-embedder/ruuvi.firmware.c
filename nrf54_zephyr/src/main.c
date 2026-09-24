@@ -378,6 +378,7 @@ int main(void)
                        (uint32_t)atomic_get(&config_window_start_ms)) >= APP_CONFIG_WINDOW_MS) {
             atomic_clear(&config_next);
         }
+        ruuvi_ui_configuration(atomic_get(&config_next) || atomic_get(&config_current));
 #endif
         if (ruuvi_ui_recovery_requested() && !recovery_reported) {
 #if RUUVI_GATT_ENABLED

@@ -12,6 +12,9 @@
 
 static atomic_t config_pending;
 static atomic_t recovery_requested;
+static K_MUTEX_DEFINE(feedback_lock);
+static bool activity_signal;
+static bool configuration_signal;
 
 #if DT_NODE_HAS_STATUS(DT_ALIAS(led0), okay)
 static const struct gpio_dt_spec activity_led = GPIO_DT_SPEC_GET(DT_ALIAS(led0), gpios);
@@ -19,13 +22,36 @@ static const struct gpio_dt_spec activity_led = GPIO_DT_SPEC_GET(DT_ALIAS(led0),
 #if DT_NODE_HAS_STATUS(DT_ALIAS(led1), okay)
 static const struct gpio_dt_spec error_led = GPIO_DT_SPEC_GET(DT_ALIAS(led1), gpios);
 #endif
+#if DT_NODE_HAS_STATUS(DT_ALIAS(led2), okay)
+static const struct gpio_dt_spec configuration_led = GPIO_DT_SPEC_GET(DT_ALIAS(led2), gpios);
+#endif
 
 #if DT_NODE_HAS_STATUS(DT_ALIAS(sw0), okay)
 static const struct gpio_dt_spec button = GPIO_DT_SPEC_GET(DT_ALIAS(sw0), gpios);
 static struct gpio_callback button_callback;
 static bool button_pressed;
 static int64_t pressed_at;
+#endif
 
+static void update_feedback(void)
+{
+#if DT_NODE_HAS_STATUS(DT_ALIAS(led0), okay)
+    (void)gpio_pin_set_dt(&activity_led, activity_signal
+#if DT_NODE_HAS_STATUS(DT_ALIAS(led2), okay)
+                          && !configuration_signal
+#endif
+    );
+#endif
+#if DT_NODE_HAS_STATUS(DT_ALIAS(led2), okay)
+    bool blue_on = activity_signal && configuration_signal;
+#if DT_NODE_HAS_STATUS(DT_ALIAS(sw0), okay)
+    blue_on = blue_on || button_pressed;
+#endif
+    (void)gpio_pin_set_dt(&configuration_led, blue_on);
+#endif
+}
+
+#if DT_NODE_HAS_STATUS(DT_ALIAS(sw0), okay)
 static void config_expired(struct k_work *work);
 static void long_pressed(struct k_work *work);
 static void button_debounced(struct k_work *work);
@@ -58,11 +84,17 @@ static void button_debounced(struct k_work *work)
         return;
     }
     if (state != 0) {
+        k_mutex_lock(&feedback_lock, K_FOREVER);
         button_pressed = true;
+        update_feedback();
+        k_mutex_unlock(&feedback_lock);
         pressed_at = k_uptime_get();
         (void)k_work_reschedule(&long_press, K_MSEC(LONG_PRESS_MS));
     } else {
+        k_mutex_lock(&feedback_lock, K_FOREVER);
         button_pressed = false;
+        update_feedback();
+        k_mutex_unlock(&feedback_lock);
         (void)k_work_cancel_delayable(&long_press);
         if (atomic_get(&recovery_requested)) {
             return;
@@ -94,6 +126,8 @@ int ruuvi_ui_init(void)
 
     atomic_clear(&config_pending);
     atomic_clear(&recovery_requested);
+    activity_signal = false;
+    configuration_signal = false;
 #if DT_NODE_HAS_STATUS(DT_ALIAS(led0), okay)
     if (!gpio_is_ready_dt(&activity_led)) {
         return -ENODEV;
@@ -108,6 +142,15 @@ int ruuvi_ui_init(void)
         return -ENODEV;
     }
     err = gpio_pin_configure_dt(&error_led, GPIO_OUTPUT_INACTIVE);
+    if (err) {
+        return err;
+    }
+#endif
+#if DT_NODE_HAS_STATUS(DT_ALIAS(led2), okay)
+    if (!gpio_is_ready_dt(&configuration_led)) {
+        return -ENODEV;
+    }
+    err = gpio_pin_configure_dt(&configuration_led, GPIO_OUTPUT_INACTIVE);
     if (err) {
         return err;
     }
@@ -140,11 +183,20 @@ int ruuvi_ui_init(void)
 
 void ruuvi_ui_activity(bool on)
 {
-#if DT_NODE_HAS_STATUS(DT_ALIAS(led0), okay)
-    (void)gpio_pin_set_dt(&activity_led, on);
-#else
-    ARG_UNUSED(on);
-#endif
+    k_mutex_lock(&feedback_lock, K_FOREVER);
+    activity_signal = on;
+    update_feedback();
+    k_mutex_unlock(&feedback_lock);
+}
+
+void ruuvi_ui_configuration(bool on)
+{
+    k_mutex_lock(&feedback_lock, K_FOREVER);
+    if (configuration_signal != on) {
+        configuration_signal = on;
+        update_feedback();
+    }
+    k_mutex_unlock(&feedback_lock);
 }
 
 void ruuvi_ui_error(bool on)

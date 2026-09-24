@@ -1,0 +1,8 @@
+tests:
+  ruuvi.ui.gpio_emulator:
+    tags:
+      - gpio
+    integration_platforms:
+      - mps2/an385
+    extra_dtc_overlay_files:
+      - mps2_ui.overlay
